@@ -3,10 +3,10 @@ run_single_measurement.py — entry point for a single CO3 or pH measurement cyc
 
 Usage
 -----
-From the project root:
+From the project root (a --config-name is always required):
 
-    # CO3 — mock hardware (default, works on any computer):
-    uv run scripts/run_single_measurement.py
+    # CO3 — mock hardware:
+    uv run scripts/run_single_measurement.py --config-name co3_config
 
     # pH — mock hardware:
     uv run scripts/run_single_measurement.py --config-name ph_config
@@ -36,9 +36,9 @@ from omegaconf import DictConfig, OmegaConf
 # Ensure the package is importable when running from the scripts/ directory
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from co3_instrument.api import CO3InstrumentAPI
-from co3_instrument.ph_api import pHInstrumentAPI
-from co3_instrument.storage.file_storage import CO3FileStorage, pHFileStorage
+from phox2.co3_api import CO3InstrumentAPI
+from phox2.ph_api import pHInstrumentAPI
+from phox2.storage.file_storage import CO3FileStorage, pHFileStorage
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ _DEFAULT_SALINITY = 35.0
 @hydra.main(
     version_base=None,
     config_path=str(Path(__file__).parent.parent / "configs"),
-    config_name="config",
+    config_name=None,
 )
 def main(cfg: DictConfig) -> None:
     """Hydra entry point — runs one complete CO3 or pH measurement cycle."""
