@@ -95,6 +95,17 @@ class CO3MeasurementResult:
             f"timestamp = {self.timestamp.isoformat(timespec='seconds')}"
         )
 
+    def to_udp_payload(self) -> dict:
+        """Return a JSON-serialisable dict for transmission over UDP."""
+        return {
+            "type": "co3_result",
+            "co3_umol_per_kg": self.co3_umol_per_kg,
+            "t_cuvette": self.t_cuvette,
+            "salinity_input": self.salinity_input,
+            "salinity_corrected": self.salinity_corrected,
+            "timestamp": self.timestamp.isoformat(timespec="seconds"),
+        }
+
 
 # ── pH data models ────────────────────────────────────────────────────────────
 
@@ -167,4 +178,17 @@ class pHMeasurementResult:
             f"r² = {self.r_square:.4f} | "
             f"timestamp = {self.timestamp.isoformat(timespec='seconds')}"
         )
+
+    def to_udp_payload(self) -> dict:
+        """Return a JSON-serialisable dict for transmission over UDP."""
+        return {
+            "type": "ph_result",
+            "pH_cuvette": self.pH_cuvette,
+            "pH_insitu": self.pH_insitu,
+            "r_square": self.r_square,
+            "t_cuvette": self.t_cuvette,
+            "salinity_input": self.salinity_input,
+            "salinity_corrected": self.salinity_corrected,
+            "timestamp": self.timestamp.isoformat(timespec="seconds"),
+        }
 

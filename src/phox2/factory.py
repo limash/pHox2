@@ -24,6 +24,8 @@ from phox2.measurement.co3_cycle import (
     SpectrometerAdjustConfig,
 )
 from phox2.measurement.ph_cycle import pHConfig, pHMeasurementCycle
+from phox2.communication.interfaces import IFerryboxClient
+from phox2.communication.udp_client import FerryboxUDPClient, NullFerryboxClient
 from phox2.physics.co3_calculator import CO3Calculator
 from phox2.physics.ph_calculator import pHCalculator
 
@@ -217,4 +219,32 @@ class InstrumentFactory:
             integration_time_ms=float(cfg.spectrometer.integration_time_ms),
             ship_code=str(cfg.ship.code),
         )
+
+    # ── Ferrybox communication ────────────────────────────────────────────
+
+    @classmethod
+    def build_ferrybox_client(cls, cfg: DictConfig) -> IFerryboxClient:
+        """
+        Return a wired ``IFerryboxClient`` based on the ``ferrybox`` config section.
+
+        Returns ``NullFerryboxClient`` when the section is absent or
+        ``ferrybox.enabled`` is ``false``.
+        """
+        fb_cfg = cfg.get("ferrybox", None)
+        if fb_cfg is None or not fb_cfg.get("enabled", False):
+            logger.info("Ferrybox communication: disabled (NullFerryboxClient)")
+            return NullFerryboxClient()
+
+        client = FerryboxUDPClient(
+            ferrybox_host=str(fb_cfg.host),
+            ferrybox_port=int(fb_cfg.ferrybox_port),
+            local_port=int(fb_cfg.local_port),
+        )
+        logger.info(
+            "Ferrybox communication: enabled — %s:%d ← local :%d",
+            fb_cfg.host,
+            fb_cfg.ferrybox_port,
+            fb_cfg.local_port,
+        )
+        return client
 

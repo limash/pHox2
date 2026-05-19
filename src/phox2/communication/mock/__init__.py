@@ -1,0 +1,1 @@
+"""Mock Ferrybox communication implementations."""

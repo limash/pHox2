@@ -106,6 +106,15 @@ output:
   base_path: "~/co3_data"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Ferrybox UDP communication
+# ──────────────────────────────────────────────────────────────────────────────
+ferrybox:
+  enabled: false            # set to true to activate UDP communication
+  host: "192.168.1.100"    # Ferrybox IP address
+  ferrybox_port: 5556       # UDP port the Ferrybox listens on (instrument → Ferrybox)
+  local_port: 5555          # local UDP port to bind  (Ferrybox → instrument)
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Hydra
 # ──────────────────────────────────────────────────────────────────────────────
 hydra:

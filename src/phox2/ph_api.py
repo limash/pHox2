@@ -22,6 +22,8 @@ from typing import Type
 import numpy as np
 from omegaconf import DictConfig
 
+from phox2.communication.interfaces import IFerryboxClient
+from phox2.communication.udp_client import NullFerryboxClient
 from phox2.factory import InstrumentFactory
 from phox2.measurement.models import pHMeasurementResult
 from phox2.measurement.ph_cycle import pHMeasurementCycle
@@ -40,10 +42,14 @@ class pHInstrumentAPI:
     ----------
     cycle:
         Fully wired pHMeasurementCycle (produced by InstrumentFactory).
+    ferrybox_client:
+        Ferrybox UDP client.  Pass ``NullFerryboxClient()`` (default) to
+        disable Ferrybox communication.  Injected by ``from_config()``.
     """
 
-    def __init__(self, cycle: pHMeasurementCycle) -> None:
+    def __init__(self, cycle: pHMeasurementCycle, ferrybox_client: IFerryboxClient | None = None) -> None:
         self._cycle = cycle
+        self._ferrybox: IFerryboxClient = ferrybox_client if ferrybox_client is not None else NullFerryboxClient()
         self._initialised = False
         self._wavelengths: np.ndarray | None = None
 
@@ -53,7 +59,8 @@ class pHInstrumentAPI:
     def from_config(cls, cfg: DictConfig) -> "pHInstrumentAPI":
         """Build an API instance from a Hydra/OmegaConf config."""
         cycle = InstrumentFactory.build_ph_cycle(cfg)
-        return cls(cycle)
+        ferrybox_client = InstrumentFactory.build_ferrybox_client(cfg)
+        return cls(cycle, ferrybox_client)
 
     # ── Context manager ───────────────────────────────────────────────────
 
@@ -85,6 +92,7 @@ class pHInstrumentAPI:
         self._cycle.initialise()
         self._wavelengths = self._cycle._wavelengths
         self._initialised = True
+        await self._ferrybox.start()
         logger.info("pH instrument ready")
 
     async def disconnect(self) -> None:
@@ -98,6 +106,7 @@ class pHInstrumentAPI:
             self._cycle._leds.turn_off()
         except Exception:
             logger.warning("Could not turn off LEDs during disconnect", exc_info=True)
+        await self._ferrybox.stop()
         logger.info("pH instrument disconnected")
 
     # ── Core measurement API ───────────────────────────────────────────────
@@ -126,7 +135,20 @@ class pHInstrumentAPI:
         """
         self._require_connected()
         logger.info("Starting single pH measurement (S=%.3f)", salinity)
-        return await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        result = await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        await self._ferrybox.send_result(result)
+        return result
+
+    # ── Ferrybox data ─────────────────────────────────────────────────────
+
+    def get_ferrybox_data(self):
+        """
+        Return the most recently received Ferrybox data packet, or ``None``.
+
+        The caller may use this to obtain the current salinity before calling
+        ``run_single_measurement()``.
+        """
+        return self._ferrybox.get_latest_data()
 
     # ── Status / introspection API ────────────────────────────────────────
 

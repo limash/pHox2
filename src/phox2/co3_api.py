@@ -26,6 +26,8 @@ from typing import Type
 import numpy as np
 from omegaconf import DictConfig
 
+from phox2.communication.interfaces import IFerryboxClient
+from phox2.communication.udp_client import NullFerryboxClient
 from phox2.factory import InstrumentFactory
 from phox2.measurement.co3_cycle import CO3MeasurementCycle
 from phox2.measurement.models import CO3MeasurementResult
@@ -44,10 +46,14 @@ class CO3InstrumentAPI:
     ----------
     cycle:
         Fully wired CO3MeasurementCycle (produced by InstrumentFactory).
+    ferrybox_client:
+        Ferrybox UDP client.  Pass ``NullFerryboxClient()`` (default) to
+        disable Ferrybox communication.  Injected by ``from_config()``.
     """
 
-    def __init__(self, cycle: CO3MeasurementCycle) -> None:
+    def __init__(self, cycle: CO3MeasurementCycle, ferrybox_client: IFerryboxClient | None = None) -> None:
         self._cycle = cycle
+        self._ferrybox: IFerryboxClient = ferrybox_client if ferrybox_client is not None else NullFerryboxClient()
         self._initialised = False
         self._wavelengths: np.ndarray | None = None
 
@@ -57,7 +63,8 @@ class CO3InstrumentAPI:
     def from_config(cls, cfg: DictConfig) -> "CO3InstrumentAPI":
         """Build an API instance from a Hydra/OmegaConf config."""
         cycle = InstrumentFactory.build_cycle(cfg)
-        return cls(cycle)
+        ferrybox_client = InstrumentFactory.build_ferrybox_client(cfg)
+        return cls(cycle, ferrybox_client)
 
     # ── Context manager (safe resource management) ────────────────────────
 
@@ -89,6 +96,7 @@ class CO3InstrumentAPI:
         self._cycle.initialise()
         self._wavelengths = self._cycle._wavelengths
         self._initialised = True
+        await self._ferrybox.start()
         logger.info("CO3 instrument ready")
 
     async def disconnect(self) -> None:
@@ -104,6 +112,7 @@ class CO3InstrumentAPI:
             self._cycle._shutter.close()
         except Exception:
             logger.warning("Could not turn off light during disconnect", exc_info=True)
+        await self._ferrybox.stop()
         logger.info("CO3 instrument disconnected")
 
     # ── Core measurement API ───────────────────────────────────────────────
@@ -133,7 +142,20 @@ class CO3InstrumentAPI:
         """
         self._require_connected()
         logger.info("Starting single CO3 measurement (S=%.3f)", salinity)
-        return await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        result = await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        await self._ferrybox.send_result(result)
+        return result
+
+    # ── Ferrybox data ─────────────────────────────────────────────────────
+
+    def get_ferrybox_data(self):
+        """
+        Return the most recently received Ferrybox data packet, or ``None``.
+
+        The caller may use this to obtain the current salinity before calling
+        ``run_single_measurement()``.
+        """
+        return self._ferrybox.get_latest_data()
 
     # ── Status / introspection API ────────────────────────────────────────
 
