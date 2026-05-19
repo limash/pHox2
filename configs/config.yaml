@@ -1,0 +1,96 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Hardware backend selection
+# ──────────────────────────────────────────────────────────────────────────────
+hardware:
+  use_mock: true          # set to false on real Raspberry Pi instrument
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GPIO pin assignments (BCM numbering)
+# ──────────────────────────────────────────────────────────────────────────────
+gpio:
+  # Bistable inlet valve — [enable, channel_1, channel_2]
+  valve_enable_pin: 24
+  valve_ch1_pin: 23
+  valve_ch2_pin: 25
+  valve_toggle_duration_s: 0.3   # pulse duration to flip the bistable valve
+
+  water_pump_pin: 21             # sample flush pump relay
+  dye_pump_pin: 19               # dye solenoid pump relay
+  stirrer_pin: 20                # magnetic stirrer relay
+  drain_pin: 16                  # drain valve relay
+  air_pin: 26                    # compressed-air pump relay (pushes liquid)
+  light_pin: 17                  # UV lamp relay
+  shutter_pin: 27                # mechanical shutter relay
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ADC (ADCDifferentialPi, I²C)
+# ──────────────────────────────────────────────────────────────────────────────
+adc:
+  temperature_channel: 8         # ADC channel connected to the temperature probe
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Temperature probe
+# ──────────────────────────────────────────────────────────────────────────────
+temperature:
+  # T_cuvette (°C) = coef[0] * voltage + coef[1]
+  calibration_coefficients: [-1.234, 15.678]
+  n_averages: 3
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Spectrometer
+# ──────────────────────────────────────────────────────────────────────────────
+spectrometer:
+  integration_time_ms: 18.0
+  n_averages: 6
+  light_threshold_counts: 60000  # target intensity for auto-adjust
+  autoadjust:
+    enabled: true
+    tolerance_fraction: 0.05     # ±5 % around target
+    max_iterations: 20
+    step_ms: 500                 # integration-time step during binary search
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CO3 chemistry
+# ──────────────────────────────────────────────────────────────────────────────
+co3:
+  wavelength_1_nm: 234.0    # main absorbance peak  (A1)
+  wavelength_2_nm: 250.0    # secondary peak         (A2)
+  wavelength_3_nm: 350.0    # reference baseline     (A3)
+  dye: "Pb_perchlor"        # Pb_perchlor | Pb_chlor
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Measurement cycle
+# ──────────────────────────────────────────────────────────────────────────────
+measurement:
+  cuvette_volume_ml: 16.0
+  dye_volume_per_shot_ml: 0.03
+  dye_n_shots: 6             # solenoid pulses per injection event
+  n_cycles: 1                # dye injection + absorbance cycles per measurement
+  mix_time_s: 10.0           # stirring time after dye injection
+  wait_time_s: 5.0           # settling time after stirrer stops
+  pump_time_s: 60.0          # sample flush duration before measurement
+  drain_after: true          # drain cuvette after each measurement
+  drain_time_s: 60.0
+
+  # Divide all asyncio.sleep durations by this factor.
+  # Set > 1 (e.g. 100) for fast mock runs; leave at 1 for real hardware.
+  time_acceleration: 100
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ship / platform
+# ──────────────────────────────────────────────────────────────────────────────
+ship:
+  code: "NB"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Output
+# ──────────────────────────────────────────────────────────────────────────────
+output:
+  base_path: "~/co3_data"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hydra — keep output in a fixed directory so the script is reproducible
+# ──────────────────────────────────────────────────────────────────────────────
+hydra:
+  run:
+    dir: "outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}"
