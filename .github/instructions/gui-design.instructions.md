@@ -60,7 +60,7 @@ The plot panel and the tab panel are arranged side-by-side horizontally. The plo
 - Vertical dashed lines at: λ1=234 nm (blue), λ2=250 nm (orange), λ3=350 nm (white)
 
 **Data source**: `await api.get_spectrum()` — called on a periodic timer.  
-During Measuring or Adjusting modes, update the plot with the spectrum already captured inside the measurement cycle (the instrument stores `instrument.spectrum` after each spectrometer read). This avoids a conflicting hardware call.
+During Measuring or Adjusting modes, **pause the periodic timer** (do not call `api.get_spectrum()`). After the cycle completes, update Plot 1 from `MeasurementResult.spectra.blank` (last clean spectrum before dye). Real-time spectrum updates mid-cycle require a future push-callback mechanism in the API.
 
 ---
 
@@ -85,11 +85,11 @@ Populated after each complete measurement cycle using the `evalPar_df` DataFrame
 |----------|-------|
 | X range | 220–360 nm |
 | Y axis | Absorbance (A.U.) |
-| Series | One line per injection cycle (up to `ncycles` coloured lines) |
+| Series | One line per injection cycle (up to `n_cycles` coloured lines) |
 | Colours | Cycle through: red, green, blue, magenta, yellow |
 | Interaction | Zoom/pan disabled |
 
-Each absorbance line is updated in real time during the injection cycle as each spectrum is captured. Before each new measurement cycle, all lines are reset to zero.
+Before each new measurement cycle, all lines are reset to zero. After the cycle completes, draw all injection lines from `MeasurementResult.spectra.injections` (a `dict[int, np.ndarray]` keyed by 0-based injection index). Real-time per-injection updates during the cycle require a future push-callback in the API.
 
 ---
 
@@ -114,8 +114,8 @@ A vertical list of read-only checkboxes, one per step, checked by the cycle as i
 1. Adjusting Light
 2. Dark and blank
 3. Measurement 1
-4. Measurement 2  *(if ncycles > 1)*
-5. …  *(up to ncycles)*
+4. Measurement 2  *(if n_cycles > 1)*
+5. …  *(up to n_cycles)*
 
 All checkboxes are read-only (display only). They are all unchecked at the start of a cycle and reset to unchecked when the cycle ends.
 
@@ -279,7 +279,7 @@ Buttons beside it:
 - **"Clear all"** — resets to 0
 
 The current value is persisted to the config JSON file on every change.  
-Each completed measurement cycle automatically deducts: `ncycles × DYE_V_INJ × dye_nshots`.
+Each completed measurement cycle automatically deducts: `n_cycles × dye_volume_per_shot_ml × dye_n_shots` (from config).
 
 ### Last measurement QC (group box "Last Measurement Quality Control")
 
@@ -363,7 +363,7 @@ The CO3 UV lamp requires ~3 minutes to stabilise before a measurement.
 
 ### Drain workflow
 
-After each CO3 measurement cycle (if `drain_mode = "ON"`):
+After each CO3 measurement cycle (if `measurement.drain_after = true` in config):
 1. Show "Draining" in the status box
 2. Call `await api.drain_cuvette()`
 3. The Drain button reflects the running state (checked while draining)

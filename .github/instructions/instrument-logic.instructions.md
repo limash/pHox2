@@ -2,68 +2,140 @@
 description: "Use when implementing, extending, or writing standalone Python modules for pH or CO3 seawater instruments. Covers hardware abstraction, measurement physics, measurement cycle, data formats, configuration schema, and quality control. Do NOT use for GUI work."
 ---
 
-# pHox / pCO3 Instrument Logic
+# CO3 (and future pH) Instrument Logic
 
 ## Overview
 
-The system measures seawater pH and/or carbonate ion concentration (CO3²⁻) using spectrophotometric dye injection. It runs on a Raspberry Pi and interfaces with a Ferrybox flow-through system. The codebase decouples hardware/physics (`pHox.py`) from the PyQt5 GUI (`pHox_gui.py`). New standalone modules should only depend on `pHox.py`, `udp.py`, `util.py`, and `precisions.py`.
+The system measures seawater pH and/or carbonate ion concentration (CO3²⁻) using spectrophotometric dye injection. It runs on a Raspberry Pi and interfaces with a Ferrybox flow-through system.
+
+**Currently implemented**: CO3 instrument only. pH instrument support is planned and the physics/config sections for pH are retained for future implementation.
 
 ---
 
-## Class Hierarchy
+## Architecture
+
+The codebase follows dependency inversion and interface-segregation principles. No class ever imports a concrete hardware driver directly — all dependencies are injected as abstractions.
 
 ```
-Spectro_seabreeze  |  Spectro_localtest      ← spectrometer abstraction
-        └──────────────────┘
-Common_instrument(panelargs)
-├── pH_instrument(Common_instrument)
-│   └── Test_pH_instrument(pH_instrument)    ← local dev mock
-└── CO3_instrument(Common_instrument)
-    └── Test_CO3_instrument(CO3_instrument)  ← local dev mock
+configs/config.yaml              ← Hydra/OmegaConf configuration
+        │
+InstrumentFactory.build_cycle()  ← wires concrete → abstract; selects mock vs. real
+        │
+CO3MeasurementCycle              ← orchestrates the measurement sequence
+  ├── ISpectrometer
+  ├── IValve
+  ├── IWaterPump
+  ├── IDyePump
+  ├── IStirrer
+  ├── ILightSource
+  ├── IShutter
+  ├── IDrain
+  ├── ITemperatureSensor
+  └── CO3Calculator
+        │
+CO3InstrumentAPI                 ← public surface used by GUI and scripts
+        │
+FileStorage                      ← writes .spt / .evl / .log to disk (external)
 ```
 
-Both instrument classes share fluidics, temperature measurement, ADC, and spectrometer via `Common_instrument`.
+**pH instrument** (future): will follow the same pattern with a `pHInstrumentAPI` and a `pHMeasurementCycle`.
 
 ---
 
 ## Configuration System
 
-Config is loaded from `~/box_id.txt` → `configs/config_{BOX_ID}.json`.  
-`util.CONFIG_FILE` is a `dict` with sections: `Operational`, `pH`, `CO3`, `pCO2`, `TrisBuffer`, `QC`.
+Config is loaded via **Hydra/OmegaConf** from `configs/config.yaml`. Access the config as a `DictConfig` object; pass it to `InstrumentFactory.build_cycle(cfg)`.
 
-### `[Operational]` — Shared by both instruments
+### `hardware` section
 
 | Key | Type | Example | Description |
 |-----|------|---------|-------------|
-| `TEMP_PROBE_ID` | str | `"Probe_1"` | Which temp probe calibration entry to use |
-| `T_PROBE_CH` | int | `8` | ADC channel for temperature probe |
-| `WPUMP_SLOT` | int | `17` | GPIO BCM pin for water pump relay |
-| `DYEPUMP_SLOT` | int | `18` | GPIO BCM pin for dye pump relay |
-| `STIRR_SLOT` | int | `27` | GPIO BCM pin for stirrer relay |
-| `SPARE_SLOT` | int | `22` | GPIO BCM pin for spare relay |
-| `VALVE_SLOTS` | list[int] | `[24, 23, 25]` | Bistable valve GPIO pins: [enable, ch1, ch2] |
-| `DYE_V_INJ` | float | `0.03` | Volume per dye pump shot (mL) |
-| `CUVETTE_V` | int/float | `16` | Cuvette volume (mL) |
-| `dye_nshots` | int | `1` (pH), `6` (CO3) | Dye pump pulses per injection event |
-| `ncycles` | int | `4` (pH), `1` (CO3) | Dye injection cycles per measurement |
-| `specAvScans` | int | `6` | Number of spectra to average per reading |
-| `AUTOSTART` | str | `"True"` | Whether to autostart on boot |
-| `AUTOSTART_MODE` | str | `"pump"` | `"pump"`, `"time"`, or `"now"` |
-| `SAMPLING_INTERVAL_MIN` | int | `5` (pH), `30` (CO3) | Minutes between automatic measurements |
-| `pumpTime_sec` | int | `60` | Seconds to flush sample before measuring |
-| `mixTime` | int | `0` (pH), `10` (CO3) | Seconds to mix after dye injection |
-| `waitTime` | int | `0` (pH), `5` (CO3) | Seconds to wait after stirrer stops |
-| `Spectro_Integration_time` | float | `60.0` | Spectrometer integration time (ms) |
-| `LIGHT_THRESHOLD_STS` | int | `15500` | Target intensity counts for STS spectrometer |
-| `LIGHT_THRESHOLD_FLAME` | int | `60000` | Target intensity counts for FLAME spectrometer |
-| `Autoadjust_state` | str | `"ON"` | `"ON"`, `"OFF"`, or `"ON_NORED"` |
-| `drain_mode` | str | `"ON"` | Whether to drain cuvette after CO3 measurement |
-| `drain_slot` | int | `19` | GPIO pin for drain relay |
-| `air_slot` | int | `16` | GPIO pin for air pump relay (pushes liquid out) |
-| `drain_time` | int | `15` | Seconds to run drain + air pump |
-| `Ship_Code` | str | `"NB"` | Ship/platform identifier |
+| `use_mock` | bool | `true` | Use mock hardware (dev/CI); set `false` on real Raspberry Pi |
 
-### `[pH]` section
+### `gpio` section (BCM pin numbering)
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `valve_enable_pin` | int | `24` | Bistable valve enable pulse pin |
+| `valve_ch1_pin` | int | `23` | Bistable valve channel 1 pin |
+| `valve_ch2_pin` | int | `25` | Bistable valve channel 2 pin |
+| `valve_toggle_duration_s` | float | `0.3` | Pulse duration to flip the bistable valve |
+| `water_pump_pin` | int | `21` | Sample flush pump relay |
+| `dye_pump_pin` | int | `19` | Dye solenoid pump relay |
+| `stirrer_pin` | int | `20` | Magnetic stirrer relay |
+| `drain_pin` | int | `16` | Drain valve relay |
+| `air_pin` | int | `26` | Compressed-air pump relay (pushes liquid out during drain) |
+| `light_pin` | int | `17` | UV lamp relay |
+| `shutter_pin` | int | `27` | Mechanical shutter relay |
+
+### `adc` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `temperature_channel` | int | `8` | ADC channel connected to the temperature probe |
+
+### `temperature` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `calibration_coefficients` | list[float] | `[-1.234, 15.678]` | `[coef0, coef1]`; T_cuvette (°C) = coef[0] × voltage + coef[1] |
+| `n_averages` | int | `3` | ADC readings to average per temperature sample |
+
+### `spectrometer` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `integration_time_ms` | float | `18.0` | Initial integration time |
+| `n_averages` | int | `6` | Spectra to average per reading |
+| `light_threshold_counts` | int | `60000` | Target intensity counts for auto-adjust |
+| `autoadjust.enabled` | bool | `true` | Whether to run auto-adjust before each measurement |
+| `autoadjust.tolerance_fraction` | float | `0.05` | ±5% tolerance band around threshold |
+| `autoadjust.max_iterations` | int | `20` | Binary-search iteration limit |
+| `autoadjust.step_ms` | float | `500` | Integration-time step size (ms) |
+
+### `co3` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `wavelength_1_nm` | float | `234.0` | Main absorbance peak (A1) |
+| `wavelength_2_nm` | float | `250.0` | Secondary peak (A2) |
+| `wavelength_3_nm` | float | `350.0` | Reference baseline (A3) |
+| `dye` | str | `"Pb_perchlor"` | `"Pb_perchlor"` or `"Pb_chlor"` |
+
+### `measurement` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `cuvette_volume_ml` | float | `16.0` | Cuvette volume (mL) |
+| `dye_volume_per_shot_ml` | float | `0.03` | Volume per dye solenoid pulse (mL) |
+| `dye_n_shots` | int | `6` | Solenoid pulses per injection event |
+| `n_cycles` | int | `1` | Dye injection + absorbance cycles per measurement |
+| `mix_time_s` | float | `10.0` | Stirring time after dye injection (s) |
+| `wait_time_s` | float | `5.0` | Settling time after stirrer stops (s) |
+| `pump_time_s` | float | `60.0` | Sample flush duration before measurement (s) |
+| `drain_after` | bool | `true` | Drain cuvette after each measurement |
+| `drain_time_s` | float | `60.0` | Drain + air-pump duration (s) |
+| `time_acceleration` | float | `1.0` | Divide all `asyncio.sleep` durations by this; set >1 for fast mock runs |
+
+### `ship` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `code` | str | `"NB"` | Ship/platform identifier included in every log row |
+
+### `output` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `base_path` | str | `"~/co3_data"` | Root directory for `FileStorage` output |
+
+---
+
+### pH configuration (future)
+
+The pH instrument will add the following config sections (not yet in `config.yaml`):
+
+**`[pH]` section**
 
 | Key | Type | Example | Description |
 |-----|------|---------|-------------|
@@ -72,27 +144,13 @@ Config is loaded from `~/box_id.txt` → `configs/config_{BOX_ID}.json`.
 | `LED2` | int | `55` | Orange LED PWM duty cycle (0–100) |
 | `LED3` | int | `55` | Red LED PWM duty cycle (0–100) |
 | `Default_DYE` | str | `"MCP"` | Indicator dye: `"MCP"` or `"TB"` |
-| `wl_NIR-` | int | `730` | NIR reference wavelength (nm) |
+| `wl_NIR` | int | `730` | NIR reference wavelength (nm) |
 | `MCP_wl_HI` | int | `434` | MCP acid-form wavelength (nm) |
 | `MCP_wl_I2` | int | `578` | MCP base-form wavelength (nm) |
 | `TB_wl_HI` | int | `434` | TB acid-form wavelength (nm) |
 | `TB_wl_I2` | int | `596` | TB base-form wavelength (nm) |
-| `PPHOX_STRING_VERSION` | str | `"1"` | Data string protocol version |
 
-### `[CO3]` section
-
-| Key | Type | Example | Description |
-|-----|------|---------|-------------|
-| `WL_1` | int | `234` | First UV measurement wavelength (nm) |
-| `WL_2` | int | `250` | Second UV measurement wavelength (nm) |
-| `WL_3` | int | `350` | Reference UV wavelength (nm) |
-| `LIGHT_SLOT` | int | `17` | GPIO pin for UV lamp relay |
-| `SHUTTER_SLOT` | int | `27` | GPIO pin for shutter relay |
-| `Default_DYE` | str | `"Pb_perchlor"` | `"Pb_perchlor"` or `"Pb_chlor"` |
-| `lamp_time` | int | `3` | Minutes before measurement to pre-warm lamp |
-| `PCO3_string_version` | str | `"1"` | Data string protocol version |
-
-### `[TrisBuffer]` section (calibration)
+**`[TrisBuffer]` section (pH calibration)**
 
 | Key | Type | Example | Description |
 |-----|------|---------|-------------|
@@ -101,116 +159,141 @@ Config is loaded from `~/box_id.txt` → `configs/config_{BOX_ID}.json`.
 | `Calibration_threshold` | float | `0.005` | Max acceptable |ΔpH| between measured and theoretical |
 | `Calibration_pump_time` | int | `30` | Seconds to pump calibration solution |
 
-### `[QC]` section
-
-| Key | Type | Example | Description |
-|-----|------|---------|-------------|
-| `flow_threshold` | int | `2000` | Min intensity difference (counts) confirming flow |
-
 ### Temperature probe calibration
 
-Loaded from `configs/temperature_sensors_config.json`. Each entry keyed by `Probe_N`:
+Loaded from `configs/temperature_sensors_config.json` (referenced via the `temperature.calibration_coefficients` key in `config.yaml`; JSON file used when multiple probes are available):
 ```json
 {
   "Probe_1": {
     "is_calibrated": "True",
     "Calibr_coef": [-1.234, 15.678]
-  },
-  "Probe_Default": {
-    "is_calibrated": "False",
-    "Calibr_coef": [-1.0, 16.0]
   }
 }
 ```
-`T_cuvette = coef[0] * voltage + coef[1]` (result in °C)
+`T_cuvette = coef[0] * voltage + coef[1]` (°C)
 
 ---
 
 ## Hardware Interfaces
 
-### Spectrometer (`Spectro_seabreeze` / `Spectro_localtest`)
+Hardware is accessed exclusively through abstract interfaces defined in `co3_instrument.components.interfaces` and `co3_instrument.hardware.interfaces`. Concrete implementations live under `hardware/mock/` and `hardware/real/`; `InstrumentFactory` selects between them based on `hardware.use_mock`.
 
-Both implement the same interface:
-```python
-spectrometer.set_integration_time_not_async(time_ms: float)
-await spectrometer.set_integration_time(time_ms: float)
-spectrometer.get_wavelengths() -> np.ndarray        # pixel wavelength array (nm)
-await spectrometer.get_intensities(num_avg=1, correct=True) -> np.ndarray
-spectrometer.get_intensities_slow(num_avg=1, correct=True) -> np.ndarray  # sync
-spectrometer.set_scans_average(num: int)            # not supported on FLAME
-spectrometer.spectro_type: str                      # "STS" or "FLMT"
-```
-
-Spectro type detection: `seabreeze` returns a string representation; search for `"STS"` or `"FLMT"` substring. Default to `"FLMT"` if not found.
-
-### GPIO / relays (via `pigpio`)
+### Component interfaces (`co3_instrument.components.interfaces`)
 
 ```python
-rpi = pigpio.pi()
+class IValve(ABC):
+    async def open(self) -> None   # open inlet (sample flows in)
+    async def close(self) -> None  # close inlet (sample isolated)
 
-# SSR relay (simple on/off)
-rpi.write(pin, True)   # turn on
-rpi.write(pin, False)  # turn off
+class IWaterPump(ABC):
+    async def run(self, duration_s: float) -> None
 
-# PWM (LED control)
-rpi.set_mode(pin, pigpio.OUTPUT)
-rpi.set_PWM_frequency(pin, 100)        # 100 Hz
-rpi.set_PWM_dutycycle(pin, duty)       # 0–255 (the code uses 0–100 scale via adjust_LED)
+class IDyePump(ABC):
+    async def pulse(self, n_shots: int) -> None
+
+class IStirrer(ABC):
+    def start(self) -> None
+    def stop(self) -> None
+
+class ILightSource(ABC):
+    def turn_on(self) -> None
+    def turn_off(self) -> None
+
+class IShutter(ABC):
+    def open(self) -> None
+    def close(self) -> None
+
+class IDrain(ABC):
+    async def drain(self, duration_s: float) -> None
+
+class ITemperatureSensor(ABC):
+    def read_voltage(self) -> float
+    def read_temperature(self) -> float  # °C
 ```
 
-Note: `adjust_LED(led_index, duty_0_to_100)` calls `rpi.set_PWM_dutycycle(led_slots[led_index], duty_0_to_100)`.
-
-### Bistable valve (`set_Valve`, `set_Valve_bistable`, `set_Valve_sync`)
+### Hardware layer (`co3_instrument.hardware.interfaces`)
 
 ```python
-# VALVE_SLOTS = [enable_pin, ch1_pin, ch2_pin]
-# Open:  write ch1=True, ch2=False, enable=True, sleep 0.3s, release all
-# Close: write ch1=False, ch2=True (swapped), enable=True, sleep 0.3s, release all
+class ISpectrometer(ABC):
+    def get_wavelengths(self) -> np.ndarray          # (n_pixels,) nm
+    async def get_intensities(self) -> np.ndarray    # (n_pixels,) counts
+    def set_integration_time(self, ms: float) -> None
+    def reset_measurement_state(self) -> None
+
+class IDigitalOutput(ABC):
+    def write(self, pin: int, value: bool) -> None
+
+class IAnalogInput(ABC):
+    def read_voltage(self, channel: int) -> float
 ```
 
-Async version: `await set_Valve(True/False)` | Sync version: `set_Valve_sync(True/False)`
+### Real hardware (when `use_mock: false`)
 
-### ADC (temperature voltage)
+| Abstraction | Concrete class | Underlying library |
+|-------------|---------------|-------------------|
+| `ISpectrometer` | `SeabreezeSpectrometer` | `seabreeze` |
+| `IDigitalOutput` | `PigpioDigitalOutput` | `pigpio` |
+| `IAnalogInput` | `ADCDifferentialPiReader` | `ADCDifferentialPi` (I²C, 14-bit) |
 
-```python
-adc = ADCDifferentialPi(0x68, 0x69, 14)   # I2C, 14-bit
-adc.set_pga(1)
-voltage = adc.read_voltage(channel)        # returns float (volts)
-```
-`get_Voltage(nAver, channel)` averages `nAver` reads, returns rounded float.
+The GUI and measurement cycle **never** import `pigpio`, `seabreeze`, or `ADCDifferentialPi` directly.
 
-### Dye pump (solenoid)
+---
 
-Each shot: relay on for 0.15 s, off for 0.35 s. `nshots` shots per injection event.
+## Data Models
+
+`MeasurementResult` (frozen dataclass) is the primary DTO returned by `CO3InstrumentAPI.run_single_measurement()`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | `datetime` | Cycle start time |
+| `ship_code` | `str` | From `ship.code` config key |
+| `co3_umol_per_kg` | `float` | Final CO3²⁻ concentration (µmol/kg) |
+| `t_cuvette` | `float` | Cuvette temperature at measurement (°C) |
+| `salinity_input` | `float` | Salinity before dilution correction |
+| `salinity_corrected` | `float` | Salinity after dilution correction |
+| `voltage` | `float` | Raw ADC voltage |
+| `a1`, `a2`, `a3` | `float` | Absorbance at λ1, λ2, λ3 |
+| `r_ratio` | `float` | `(A2−A3)/(A1−A3)` |
+| `e1`, `e3e2`, `log_beta1_e2` | `float` | Chemistry coefficients |
+| `vol_injected_ml` | `float` | Cumulative dye volume injected (mL) |
+| `dye` | `str` | Dye name from config |
+| `injections` | `tuple[InjectionResult, …]` | One per injection cycle |
+| `spectra` | `SpectralData` | Raw intensity arrays |
+
+`SpectralData` fields: `wavelengths` (nm array), `dark` (counts), `blank` (counts), `injections: dict[int, np.ndarray]` (keyed by 0-based injection index).
+
+`InjectionResult` has the same chemistry fields as above, plus `injection_index` and `dilution`.
 
 ---
 
 ## Measurement Cycle (both instruments)
 
-The full cycle is implemented as an async workflow. Steps in order:
+The full cycle is implemented as an async workflow in `CO3MeasurementCycle.run()`. Steps in order:
 
 ```
-1. [Optional] Pump sample — flush chamber for pumpTime_sec seconds
-2. Close inlet valve
-3. Auto-adjust light source (LEDs for pH, integration time for CO3)
-4. Measure dark spectrum (LEDs off / shutter closed)
-5. Measure blank spectrum (clean water, no dye)
-6. For n_inj in range(ncycles):
+0. [Optional] Flush sample — run water pump for pump_time_s seconds
+1. Close inlet valve
+2. Auto-adjust integration time (binary search, if autoadjust.enabled)
+3. Dark measurement — close shutter, capture spectrum, open shutter
+4. Blank measurement — capture spectrum with clean water, no dye
+5. For n in range(n_cycles):
    a. Start stirrer
-   b. Inject dye: nshots pulses (0.15 s on / 0.35 s off per shot)
-   c. Mix: sleep mixTime seconds
+   b. Inject dye: dye_n_shots pulses
+   c. Mix: sleep mix_time_s seconds
    d. Stop stirrer
-   e. Wait: sleep waitTime seconds
-   f. Read temperature voltage (ADC, 3 averages)
-   g. Capture spectrum (specAvScans averages)
-   h. Calculate absorbance
-   i. Calculate pH or CO3
-7. Compute final value (regression for pH, direct for CO3)
-8. QC checks
-9. [CO3 only, if drain_mode='ON'] Drain cuvette
-10. Open inlet valve
-11. Save results
+   e. Wait: sleep wait_time_s seconds
+   f. Read temperature voltage (ADC, n_averages)
+   g. Capture post-injection spectrum
+   h. Calculate absorbance spectrum
+   i. Calculate CO3 (or pH for future pH instrument)
+6. [if drain_after] Drain cuvette — drain + air pump for drain_time_s seconds
+7. Open inlet valve
+8. Build and return MeasurementResult
 ```
+
+File saving (`FileStorage.save(result)`) is the caller's responsibility; the cycle does not write to disk.
+
+`time_acceleration` divides all `asyncio.sleep` durations — set >1 for fast mock testing.
 
 ---
 
@@ -221,9 +304,9 @@ absorbance_spectrum = -np.log10(
     (postinjection_spectrum - dark) / (blank - dark)
 )
 ```
-Absorbance at 3 wavelengths (`wvlPixels[0]`, `wvlPixels[1]`, `wvlPixels[2]`) are extracted.
+Absorbance at 3 wavelengths (λ1, λ2, λ3) is extracted at the resolved pixel indices.
 
-Pixel indices: `find_nearest(wavelength_array, target_nm)` → `np.abs(array - value).argmin()`
+Pixel index resolution: `CO3Calculator.find_pixel(wavelengths, target_nm)` → `np.abs(wavelengths - target_nm).argmin()`
 
 ---
 
@@ -367,24 +450,18 @@ CO3 = 1.0e6 * (10 ** -(log_beta1_e2 + np.log10(arg)))  # µmol/kg
 
 ### Final CO3 value
 
-With `ncycles = 1` (current default), `CO3` is taken directly from the single measurement row. The function `calc_final_co3(evalPar_df)` returns `(co3, T_cuvette)`.
+With `n_cycles = 1` (current default), `CO3` is taken directly from the single `InjectionResult`. With `n_cycles > 1`, the mean CO3 across injections is used. The final value is stored in `MeasurementResult.co3_umol_per_kg`.
 
 ### Light source (UV lamp)
 
 - Relay-controlled; must warm up ~3 minutes before measurement
-- Shutter (relay on `SHUTTER_SLOT`) blocks light during dark measurement
-- Dark: close shutter → capture → open shutter
-- Auto-adjust: integration time only (no lamp power control), same binary-search algorithm as pH but targets `wvlPixels` pixel levels
+- Shutter (`IShutter`) blocks light during dark measurement
+- Dark: `shutter.close()` → capture → `shutter.open()`
+- Auto-adjust: integration time only (no lamp power control), same binary-search algorithm as pH but targets the configured `light_threshold_counts`
 
 ### Drain sequence
 
-```python
-turn_on_relay(drain_slot)
-turn_on_relay(air_slot)
-sleep(drain_time)   # seconds
-turn_off_relay(air_slot)
-turn_off_relay(drain_slot)
-```
+Handled by `IDrain.drain(duration_s)`. Internally activates drain relay then air-pump relay for `drain_time_s` seconds, then releases both.
 
 ---
 
@@ -398,6 +475,8 @@ Priority order:
 ---
 
 ## UDP Communication (`udp.py`)
+
+> **Not yet implemented in the current codebase.** The spec below defines the intended future module.
 
 Two background threads (start automatically on import):
 - **Receiver** listens on port `56800` for `$PFBOX,...` datagrams from Ferrybox
@@ -419,51 +498,49 @@ Data string formats (written to `udp.DATA_STRING`):
 pH:  "$PPHOX,{version},{row_csv},*\n"
 CO3: "$PCO3,{version},{row_csv},*\n"
 ```
-where `row_csv` is the log row as CSV with no header.
-
 Default `DATA_STRING = '$PHOX,-998'` until first measurement.
 
 ---
 
 ## Data Files and Formats
 
-Base directory: `~/pHox_data/`
+Files are written by `FileStorage(base_path)`. Base directory comes from `output.base_path` in config (e.g. `~/co3_data`).
 
 ### SPT file (spectrum data)
-Path: `data_pH/spt/{timestamp}.spt` or `data_co3/spt/{timestamp}.spt`  
-Format: transposed CSV. Rows = measurement columns (`Wavelengths`, `dark`, `blank`, `0`, `1`, …). Columns = pixel indices. Written via `DataFrame.T.to_csv(path, index=True, header=False)`.
+Path: `{base}/data_co3/spt/{timestamp}.spt`  
+Format: transposed CSV. Rows = named columns (`Wavelengths`, `dark`, `blank`, `0`, `1`, …). Columns = pixel indices. Written via `DataFrame.T.to_csv(path, index=True, header=False)`.
 
 ### EVL file (intermediate evaluation, per injection)
 
-**pH EVL columns** (`data_pH/evl/{timestamp}.evl`):
-```
-pH, pK, e1, e2, e3, Voltage, salinity, A1, A2, T_cuvette, S_corr, Anir,
-Vol_injected, TempProbe_id, Probe_iscalibr, TempCalCoef1, TempCalCoef2, DYE
-```
-
-**CO3 EVL columns** (`data_co3/evl/{timestamp}.evl`):
+**CO3 EVL columns** (`{base}/data_co3/evl/{timestamp}.evl`):
 ```
 CO3, e1, e3e2, log_beta1_e2, Voltage, S, A1, A2, R, T_cuvette,
 Vol_injected, S_corr, A350
 ```
 
+**pH EVL columns** (future, `{base}/data_pH/evl/{timestamp}.evl`):
+```
+pH, pK, e1, e2, e3, Voltage, salinity, A1, A2, T_cuvette, S_corr, Anir,
+Vol_injected, TempProbe_id, Probe_iscalibr, TempCalCoef1, TempCalCoef2, DYE
+```
+
 ### Log file (one row per final measurement)
 
-**pH log** (`data_pH/pH.log`):
+**CO3 log** (`{base}/data_co3/CO3.log`), columns written by `FileStorage._append_log`:
+```
+Time, SHIP, co3, T_cuvette, S_input, S_corr, voltage, A1, A2, A3, R, dye
+```
+
+**pH log** (future, `{base}/data_pH/pH.log`):
 ```
 Time, Lon, Lat, fb_temp, fb_sal, SHIP, pH_cuvette, T_cuvette,
 perturbation, evalAnir, pH_insitu, r_square, box_id
 ```
 
-**CO3 log** (`data_co3/CO3.log`):
-```
-Time, Lon, Lat, fb_temp, fb_sal, SHIP, co3, box_id, T_cuvette
-```
+Calibration logs go to `{base}/data_pH_calibr/pH_cal.log` (same columns + `cal_result`, `difference`, `Buffer_theoretical_val`, `Buffer_temp`, `batch_number`).
 
-Calibration logs go to `data_pH_calibr/pH_cal.log` (same columns + `cal_result`, `difference`, `Buffer_theoretical_val`, `Buffer_temp`, `batch_number`).
-
-### JSON upload (pH only)
-Path: `data_pH/upload/{timestamp}.json`
+### JSON upload (pH only, future)
+Path: `{base}/data_pH/upload/{timestamp}.json`
 ```json
 {
   "spt": { "<col_name>": [values...] },
@@ -474,80 +551,88 @@ Path: `data_pH/upload/{timestamp}.json`
 
 ### Timestamp format
 ```python
-datetime.now().strftime("%Y%m%d_%H%M%S")   # filename
-datetime.now().isoformat("_")[0:16]          # in log rows
+result.timestamp.strftime("%Y%m%d_%H%M%S")       # filename stem
+result.timestamp.strftime("%Y-%m-%d_%H:%M")        # in log rows
 ```
 
 ---
 
 ## Quality Control Checks (after each measurement)
 
-Performed in order; results stored in `data_log_row`:
+> **Not yet in `MeasurementResult`** — QC flags are planned but not currently stored in the data model or log. The logic below defines the intended checks.
 
-| QC flag | Column | Logic |
-|---------|--------|-------|
-| Flow | `flow_QC` | `(current_blue_pixel − last_injection_blue_pixel) > flow_threshold` |
-| Dye | `dye_coming_qc` | `mean(blank − inj_0) > 5` counts |
-| Biofouling | `biofouling_qc` | `specIntTime < 2000 ms` |
-| Temp sensor | `temp_sens_qc` | Not all voltage readings identical |
-| UDP | `UDP_conn_qc` | `udp.FERRYBOX['pumping'] is not None` |
-| Overall | `overall_qc` | `all([flow, dye, bio, temp, udp])` |
+| QC flag | Logic |
+|---------|-------|
+| Flow | `(blue_pixel_after_last_injection − blue_pixel_before_last_injection) > flow_threshold` |
+| Dye | `mean(blank − inj_0) > 5` counts |
+| Biofouling | spectrometer integration time < 2 000 ms |
+| Temp sensor | Not all ADC voltage readings identical |
+| UDP | `udp.FERRYBOX['pumping'] is not None` (future, requires UDP module) |
 
-QC is checked 3 seconds after the last measurement to allow valve to open.
-
----
-
-## Output Precision (`precisions.PRECISION`)
-
-```python
-{"pH": 4, "pK": 4, "e1": 6, "e2": 6, "e3": 6, "Voltage": 5, "salinity": 2,
- "A1": 5, "A2": 5, "A3": 5, "vol_injected": 2, "T_cuvette": 3,
- "fb_temperature": 3, "evalAnir": 3, "perturbation": 3,
- "longitude": 6, "latitude": 6, "pCO2": 4}
-```
+`flow_threshold` is a future config key (suggested default: 2 000 counts).
 
 ---
 
-## `Common_instrument` Constructor Requirements
+## Output Precision
 
-`panelargs` must be an object with these boolean attributes:
-- `localdev`: if True, use mock hardware classes and skip GPIO/ADC
-- `co3`: if True, instantiate CO3 instrument (affects config loading and spectrometer type detection)
+Suggested decimal places for formatted output:
+
+| Field | Decimals |
+|-------|----------|
+| pH | 4 |
+| co3 (µmol/kg) | 1 |
+| e1, e2, e3 | 6 |
+| A1, A2, A3 | 5 |
+| voltage | 5 |
+| salinity | 2 |
+| T_cuvette | 3 |
+| vol_injected | 2 |
+| latitude, longitude | 6 |
 
 ---
 
 ## Building a Standalone Module — Checklist
 
-To implement a standalone (GUI-free) module for either instrument:
+To implement a standalone (GUI-free) module for the CO3 instrument:
 
-1. **Load config**: call `util.CONFIG_FILE` (already loaded at import; or reload from JSON path)
-2. **Instantiate spectrometer**: `Spectro_seabreeze()` or `Spectro_localtest(panelargs)` for tests
-3. **Instantiate instrument**: `pH_instrument(args)` or `CO3_instrument(args)`
-4. **Initialise wavelengths**: call `instrument.calc_wavelengths()` → `instrument.get_wvlPixels(wvls)`
-5. **Start UDP**: `import udp` (threads start automatically)
-6. **Run measurement cycle** (async): implement the 11-step cycle from the Measurement Cycle section above, using instrument methods directly
-7. **Save data**: build DataFrames matching the EVL and log column schemas above
+1. **Load config**: `cfg = OmegaConf.load("configs/config.yaml")`
+2. **Build cycle**: `cycle = InstrumentFactory.build_cycle(cfg)` (selects mock or real hardware automatically via `hardware.use_mock`)
+3. **Create API**: `api = CO3InstrumentAPI(cycle)`
+4. **Connect**: `await api.connect()` (resolves pixel indices; idempotent)
+5. **Run measurement**: `result = await api.run_single_measurement(salinity, flush_before=True)`
+6. **Save**: `FileStorage(cfg.output.base_path).save(result)`
+7. **Disconnect**: `await api.disconnect()`
 
-The test/mock classes (`Test_pH_instrument`, `Test_CO3_instrument`) show the minimum interface any standalone replacement must implement.
+Use the async context manager for safe resource handling:
+```python
+async with CO3InstrumentAPI.from_config(cfg) as api:
+    result = await api.run_single_measurement(35.0, flush_before=True)
+```
 
 ---
 
-## Key `Common_instrument` Methods
+## CO3InstrumentAPI — Method Reference
 
-| Method | Description |
-|--------|-------------|
-| `load_config()` | Reads all operational config; populates all timing/hardware attributes |
-| `update_temp_probe_coef()` | Reloads temperature calibration coefficients from JSON |
-| `turn_on_relay(pin)` / `turn_off_relay(pin)` | GPIO write wrappers |
-| `await set_Valve(bool)` | Open (True) / close (False) bistable valve (async) |
-| `set_Valve_sync(bool)` | Synchronous valve operation |
-| `await pumping(pumpTime)` | Run water pump + stirrer for pumpTime seconds |
-| `await pump_dye(nshots)` | Fire dye solenoid nshots times |
-| `get_Voltage(nAver, channel)` | Average ADC readings, return voltage |
-| `calc_wavelengths()` | Return spectrometer wavelength array |
-| `get_wvlPixels(wvls)` | Find pixel indices for `wvl_needed` wavelengths |
-| `await get_sp_levels(pixel)` | Get intensity at a specific pixel index |
-| `reset_lines()` | Set all GPIO output pins to 0 |
+| Method | Sync/Async | Description |
+|--------|-----------|-------------|
+| `await connect()` | async | Initialise hardware; resolve pixel indices |
+| `await disconnect()` | async | Safe shutdown (open valve, turn off light) |
+| `await run_single_measurement(salinity, flush_before)` | async | Full CO3 measurement cycle |
+| `await get_spectrum()` | async | Single spectrum capture (live display) |
+| `get_temperature()` | sync | Current cuvette temperature (°C) |
+| `await open_valve()` | async | Open inlet valve |
+| `await close_valve()` | async | Close inlet valve |
+| `turn_on_light()` | sync | Switch UV lamp on |
+| `turn_off_light()` | sync | Switch UV lamp off |
+| `open_shutter()` | sync | Open optical shutter |
+| `close_shutter()` | sync | Close optical shutter |
+| `await run_water_pump(duration_s)` | async | Run water pump for N seconds |
+| `await pulse_dye_pump(n_shots)` | async | Fire dye solenoid N times |
+| `start_stirrer()` | sync | Energise stirrer |
+| `stop_stirrer()` | sync | De-energise stirrer |
+| `await drain_cuvette(duration_s=None)` | async | Drain cuvette (defaults to `drain_time_s` from config) |
+| `await auto_adjust_integration_time()` | async | Binary-search integration time to hit threshold |
+| `wavelengths` | property | Spectrometer wavelength array (nm); available after connect |
 
 ---
 
