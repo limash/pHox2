@@ -36,6 +36,18 @@ class IAnalogInput(ABC):
         """Return the mean of *n* consecutive voltage readings (volts)."""
 
 
+class IPWMOutput(IDigitalOutput):
+    """PWM (pulse-width modulation) output — used to drive LED arrays.
+
+    Extends IDigitalOutput so it can be used wherever a digital GPIO driver
+    is expected (valve, pumps, stirrer, drain).
+    """
+
+    @abstractmethod
+    def set_pwm(self, pin: int, duty: int) -> None:
+        """Set PWM duty cycle on *pin* (0 = off, 100 = fully on)."""
+
+
 class ISpectrometer(ABC):
     """USB spectrometer."""
 

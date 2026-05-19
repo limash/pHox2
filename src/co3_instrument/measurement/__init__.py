@@ -1,13 +1,13 @@
 from co3_instrument.measurement.models import (
-    InjectionResult,
-    MeasurementResult,
+    CO3InjectionResult,
+    CO3MeasurementResult,
     SpectralData,
 )
 from co3_instrument.measurement.cycle import CO3MeasurementCycle
 
 __all__ = [
     "CO3MeasurementCycle",
-    "MeasurementResult",
-    "InjectionResult",
+    "CO3MeasurementResult",
+    "CO3InjectionResult",
     "SpectralData",
 ]

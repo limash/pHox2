@@ -1,12 +1,17 @@
 """
-CO3 measurement cycle.
+pH measurement cycle.
 
-Orchestrates hardware components and the CO3 calculator to produce a
-MeasurementResult.  This class owns the *sequence* of operations; it has
-no knowledge of files, UDP, or the GUI.
+Orchestrates hardware components and the pH calculator to produce a
+pHMeasurementResult.  Follows the same 8-step sequence as CO3MeasurementCycle
+with these key differences:
 
-Dependency injection via component interfaces keeps this class testable
-and replaceable without touching any hardware code.
+* Uses ILEDArray instead of ILightSource + IShutter
+  (dark = LEDs off; blank = LEDs on, no dye)
+* Runs n_cycles (default 4) injection cycles for multi-injection regression
+* Calls pHCalculator.compute() per injection and pHCalculator.regress() at end
+
+Dependency injection via component interfaces keeps this class testable and
+replaceable without touching any hardware code.
 """
 from __future__ import annotations
 
@@ -20,97 +25,49 @@ import numpy as np
 from co3_instrument.components.interfaces import (
     IDrain,
     IDyePump,
-    ILightSource,
-    IShutter,
+    ILEDArray,
     IStirrer,
     ITemperatureSensor,
     IValve,
     IWaterPump,
 )
 from co3_instrument.hardware.interfaces import ISpectrometer
+from co3_instrument.measurement.cycle import MeasurementConfig, SpectrometerAdjustConfig
 from co3_instrument.measurement.models import (
-    CO3InjectionResult,
-    CO3MeasurementResult,
     SpectralData,
+    pHInjectionResult,
+    pHMeasurementResult,
 )
-from co3_instrument.physics.co3_calculator import (
-    AbsorbanceReadings,
-    CO3Calculator,
-)
+from co3_instrument.physics.ph_calculator import pHCalculator
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MeasurementConfig:
-    cuvette_volume_ml: float
-    dye_volume_per_shot_ml: float
-    dye_n_shots: int
-    n_cycles: int
-    mix_time_s: float
-    wait_time_s: float
-    pump_time_s: float
-    drain_after: bool
-    drain_time_s: float
-    time_acceleration: float = 1.0
+class pHConfig:
+    """pH-instrument-specific wavelength and dye configuration."""
+
+    wavelength_1_nm: float   # acid-form peak (434 nm for MCP and TB)
+    wavelength_2_nm: float   # base-form peak (578 nm MCP / 596 nm TB)
+    nir_nm: float            # NIR reference (730 nm)
+    dye: str                 # "MCP" or "TB"
 
     @classmethod
-    def from_omegaconf(cls, cfg) -> "MeasurementConfig":
-        return cls(
-            cuvette_volume_ml=float(cfg.cuvette_volume_ml),
-            dye_volume_per_shot_ml=float(cfg.dye_volume_per_shot_ml),
-            dye_n_shots=int(cfg.dye_n_shots),
-            n_cycles=int(cfg.n_cycles),
-            mix_time_s=float(cfg.mix_time_s),
-            wait_time_s=float(cfg.wait_time_s),
-            pump_time_s=float(cfg.pump_time_s),
-            drain_after=bool(cfg.drain_after),
-            drain_time_s=float(cfg.drain_time_s),
-            time_acceleration=float(cfg.time_acceleration),
-        )
-
-
-@dataclass
-class CO3Config:
-    wavelength_1_nm: float
-    wavelength_2_nm: float
-    wavelength_3_nm: float
-    dye: str
-
-    @classmethod
-    def from_omegaconf(cls, cfg) -> "CO3Config":
+    def from_omegaconf(cls, cfg) -> "pHConfig":
         return cls(
             wavelength_1_nm=float(cfg.wavelength_1_nm),
             wavelength_2_nm=float(cfg.wavelength_2_nm),
-            wavelength_3_nm=float(cfg.wavelength_3_nm),
+            nir_nm=float(cfg.nir_nm),
             dye=str(cfg.dye),
         )
 
 
-@dataclass
-class SpectrometerAdjustConfig:
-    enabled: bool
-    tolerance_fraction: float
-    max_iterations: int
-    step_ms: float
-
-    @classmethod
-    def from_omegaconf(cls, cfg) -> "SpectrometerAdjustConfig":
-        return cls(
-            enabled=bool(cfg.enabled),
-            tolerance_fraction=float(cfg.tolerance_fraction),
-            max_iterations=int(cfg.max_iterations),
-            step_ms=float(cfg.step_ms),
-        )
-
-
-class CO3MeasurementCycle:
+class pHMeasurementCycle:
     """
-    Runs the full CO3 measurement sequence.
+    Runs the full pH measurement sequence.
 
     Constructor parameters are all abstractions (IValve, IDyePump, …);
-    no concrete classes are referenced here — Open/Closed + Dependency
-    Inversion principles in action.
+    no concrete classes are referenced here.
     """
 
     def __init__(
@@ -120,40 +77,40 @@ class CO3MeasurementCycle:
         water_pump: IWaterPump,
         dye_pump: IDyePump,
         stirrer: IStirrer,
-        light_source: ILightSource,
-        shutter: IShutter,
+        led_array: ILEDArray,
         drain: IDrain,
         temp_sensor: ITemperatureSensor,
-        calculator: CO3Calculator,
+        calculator: pHCalculator,
         meas_cfg: MeasurementConfig,
-        co3_cfg: CO3Config,
+        ph_cfg: pHConfig,
         light_threshold_counts: float,
         adj_cfg: SpectrometerAdjustConfig,
         integration_time_ms: float,
         ship_code: str = "UNKNOWN",
+        t_ferrybox: float | None = None,
     ) -> None:
         self._spec = spectrometer
         self._valve = valve
         self._water_pump = water_pump
         self._dye_pump = dye_pump
         self._stirrer = stirrer
-        self._light = light_source
-        self._shutter = shutter
+        self._leds = led_array
         self._drain = drain
         self._temp = temp_sensor
         self._calc = calculator
         self._mcfg = meas_cfg
-        self._co3 = co3_cfg
+        self._ph = ph_cfg
         self._threshold = light_threshold_counts
         self._adj = adj_cfg
         self._integration_time_ms = integration_time_ms
         self._ship_code = ship_code
+        self._t_ferrybox = t_ferrybox
 
         # Resolved during initialise()
         self._wavelengths: np.ndarray | None = None
         self._px1: int | None = None   # pixel for λ1
         self._px2: int | None = None   # pixel for λ2
-        self._px3: int | None = None   # pixel for λ3
+        self._px_nir: int | None = None  # pixel for NIR reference
 
     def initialise(self) -> None:
         """
@@ -162,14 +119,14 @@ class CO3MeasurementCycle:
         Must be called once before the first measurement.
         """
         self._wavelengths = self._spec.get_wavelengths()
-        self._px1 = CO3Calculator.find_pixel(self._wavelengths, self._co3.wavelength_1_nm)
-        self._px2 = CO3Calculator.find_pixel(self._wavelengths, self._co3.wavelength_2_nm)
-        self._px3 = CO3Calculator.find_pixel(self._wavelengths, self._co3.wavelength_3_nm)
+        self._px1 = pHCalculator.find_pixel(self._wavelengths, self._ph.wavelength_1_nm)
+        self._px2 = pHCalculator.find_pixel(self._wavelengths, self._ph.wavelength_2_nm)
+        self._px_nir = pHCalculator.find_pixel(self._wavelengths, self._ph.nir_nm)
         logger.info(
-            "Wavelength pixels: λ1=%.0f nm (px %d), λ2=%.0f nm (px %d), λ3=%.0f nm (px %d)",
-            self._co3.wavelength_1_nm, self._px1,
-            self._co3.wavelength_2_nm, self._px2,
-            self._co3.wavelength_3_nm, self._px3,
+            "pH wavelength pixels: λ1=%.0f nm (px %d), λ2=%.0f nm (px %d), NIR=%.0f nm (px %d)",
+            self._ph.wavelength_1_nm, self._px1,
+            self._ph.wavelength_2_nm, self._px2,
+            self._ph.nir_nm, self._px_nir,
         )
 
     # ── Public entry point ────────────────────────────────────────────────
@@ -178,17 +135,16 @@ class CO3MeasurementCycle:
         self,
         salinity: float,
         flush_before: bool = False,
-    ) -> CO3MeasurementResult:
+    ) -> pHMeasurementResult:
         """
-        Execute a complete CO3 measurement cycle.
+        Execute a complete pH measurement cycle.
 
         Parameters
         ----------
         salinity:
             In-situ salinity (PSU) used for dilution correction.
         flush_before:
-            If True, run the water pump for pump_time_s before measuring
-            to flush the sample chamber.
+            If True, run the water pump for pump_time_s before measuring.
         """
         if self._wavelengths is None:
             raise RuntimeError("Call initialise() before run().")
@@ -208,24 +164,22 @@ class CO3MeasurementCycle:
         if self._adj.enabled:
             await self._auto_adjust_integration_time()
 
-        # Reset spectrometer call-sequence state AFTER autoadjust so that the
-        # next call is treated as the start of dark → blank → sample ordering.
         self._spec.reset_measurement_state()
 
-        # ── 3. Dark measurement ──────────────────────────────────────────
+        # ── 3. Dark measurement (LEDs off) ───────────────────────────────
         logger.info("Step: dark measurement")
-        self._shutter.close()
+        self._leds.turn_off()
         await self._sleep(1.0)
         dark = await self._spec.get_intensities()
         await self._sleep(2.0)
-        self._shutter.open()
+        self._leds.turn_on()
 
         # ── 4. Blank measurement ─────────────────────────────────────────
         logger.info("Step: blank measurement")
         blank = await self._spec.get_intensities()
 
         # ── 5. Dye injection cycles ──────────────────────────────────────
-        injections: list[CO3InjectionResult] = []
+        injections: list[pHInjectionResult] = []
         injection_spectra: dict[int, np.ndarray] = {}
 
         for n in range(self._mcfg.n_cycles):
@@ -246,10 +200,14 @@ class CO3MeasurementCycle:
         await self._valve.open()
 
         # ── 8. Build result ───────────────────────────────────────────────
-        # With n_cycles=1 (typical for CO3) take the single result directly.
-        # Multiple cycles: take the mean CO3 (could be extended to regression).
-        primary = injections[0] if len(injections) == 1 else self._mean_result(injections)
+        pH_cuvette, pH_insitu, r_square, slope = pHCalculator.regress(
+            ph_values=[inj.pH for inj in injections],
+            vol_injected_ml=[inj.vol_injected_ml for inj in injections],
+            t_cuvette_values=[inj.t_cuvette for inj in injections],
+            t_ferrybox=self._t_ferrybox,
+        )
 
+        last = injections[-1]
         spectral = SpectralData(
             wavelengths=self._wavelengths,
             dark=dark,
@@ -257,23 +215,26 @@ class CO3MeasurementCycle:
             injections=injection_spectra,
         )
 
-        result = CO3MeasurementResult(
+        result = pHMeasurementResult(
             timestamp=timestamp,
             ship_code=self._ship_code,
-            co3_umol_per_kg=primary.co3_umol_per_kg,
-            t_cuvette=primary.t_cuvette,
-            salinity_input=primary.salinity_input,
-            salinity_corrected=primary.salinity_corrected,
-            voltage=primary.voltage,
-            a1=primary.a1,
-            a2=primary.a2,
-            a3=primary.a3,
-            r_ratio=primary.r_ratio,
-            e1=primary.e1,
-            e3e2=primary.e3e2,
-            log_beta1_e2=primary.log_beta1_e2,
-            vol_injected_ml=primary.vol_injected_ml,
-            dye=self._co3.dye,
+            pH_cuvette=round(pH_cuvette, 4),
+            pH_insitu=round(pH_insitu, 4),
+            r_square=round(r_square, 4),
+            slope=round(slope, 6),
+            t_cuvette=last.t_cuvette,
+            salinity_input=last.salinity_input,
+            salinity_corrected=last.salinity_corrected,
+            voltage=last.voltage,
+            a1=last.a1,
+            a2=last.a2,
+            a_nir=last.a_nir,
+            r_ratio=last.r_ratio,
+            e1=last.e1,
+            e2e3=last.e2e3,
+            pK=last.pK,
+            vol_injected_ml=last.vol_injected_ml,
+            dye=self._ph.dye,
             injections=tuple(injections),
             spectra=spectral,
         )
@@ -284,7 +245,7 @@ class CO3MeasurementCycle:
 
     @property
     def _ta(self) -> float:
-        """Time-acceleration divisor (1 = real time)."""
+        """Time-acceleration divisor."""
         return max(1.0, self._mcfg.time_acceleration)
 
     async def _sleep(self, duration_s: float) -> None:
@@ -296,39 +257,31 @@ class CO3MeasurementCycle:
         salinity: float,
         dark: np.ndarray,
         blank: np.ndarray,
-    ) -> tuple[CO3InjectionResult, np.ndarray]:
-        """Run one dye injection and return the InjectionResult + raw spectrum."""
-        logger.info("Injection cycle %d/%d", n + 1, self._mcfg.n_cycles)
+    ) -> tuple[pHInjectionResult, np.ndarray]:
+        """Run one dye injection and return the pHInjectionResult + raw spectrum."""
+        logger.info("pH injection cycle %d/%d", n + 1, self._mcfg.n_cycles)
 
-        # Stir + inject
         self._stirrer.start()
         await self._dye_pump.pulse(self._mcfg.dye_n_shots)
         await self._sleep(self._mcfg.mix_time_s)
         self._stirrer.stop()
         await self._sleep(self._mcfg.wait_time_s)
 
-        # Temperature at time of measurement
         voltage = self._temp.read_voltage()
         t_cuvette = self._temp.read_temperature()
-
-        # Spectrum after dye
         post_inj = await self._spec.get_intensities()
 
-        # Absorbance
-        abs_spectrum = CO3Calculator.compute_absorbance(post_inj, blank, dark)
-        abs_at_px = AbsorbanceReadings(
-            a1=round(float(abs_spectrum[self._px1]), 5),
-            a2=round(float(abs_spectrum[self._px2]), 5),
-            a3=round(float(abs_spectrum[self._px3]), 5),
-        )
+        abs_spectrum = pHCalculator.compute_absorbance(post_inj, blank, dark)
+        a1 = round(float(abs_spectrum[self._px1]), 5)
+        a2 = round(float(abs_spectrum[self._px2]), 5)
+        a_nir = round(float(abs_spectrum[self._px_nir]), 5)
 
-        # Dilution + chemistry
         vol_injected = (
             self._mcfg.dye_volume_per_shot_ml
             * self._mcfg.dye_n_shots
             * (n + 1)
         )
-        dilution = CO3Calculator.compute_dilution(
+        dilution = pHCalculator.compute_dilution(
             self._mcfg.cuvette_volume_ml,
             self._mcfg.dye_volume_per_shot_ml,
             self._mcfg.dye_n_shots,
@@ -336,9 +289,9 @@ class CO3MeasurementCycle:
         )
         s_corr = salinity * dilution
 
-        chemistry = self._calc.compute(abs_at_px, t_cuvette, s_corr)
+        chem = self._calc.compute(a1, a2, a_nir, t_cuvette, s_corr, self._ph.dye)
 
-        result = CO3InjectionResult(
+        result = pHInjectionResult(
             injection_index=n,
             vol_injected_ml=round(vol_injected, 3),
             dilution=round(dilution, 5),
@@ -346,26 +299,27 @@ class CO3MeasurementCycle:
             t_cuvette=round(t_cuvette, 3),
             salinity_input=salinity,
             salinity_corrected=round(s_corr, 3),
-            a1=abs_at_px.a1,
-            a2=abs_at_px.a2,
-            a3=abs_at_px.a3,
-            r_ratio=round(chemistry.r_ratio, 4),
-            e1=round(chemistry.e1, 6),
-            e3e2=round(chemistry.e3e2, 6),
-            log_beta1_e2=round(chemistry.log_beta1_e2, 6),
-            co3_umol_per_kg=round(chemistry.co3_umol_per_kg, 2),
+            a1=a1,
+            a2=a2,
+            a_nir=a_nir,
+            r_ratio=round(chem.r_ratio, 4),
+            e1=round(chem.e1, 6),
+            e2e3=round(chem.e2e3, 6),
+            pK=round(chem.pK, 6),
+            pH=round(chem.pH, 4),
+            dye=self._ph.dye,
         )
         return result, post_inj
 
     async def _auto_adjust_integration_time(self) -> None:
-        """Binary-search integration time to hit the target intensity."""
+        """Binary-search integration time to hit the target LED intensity."""
         target = self._threshold
         lo = target * (1.0 - self._adj.tolerance_fraction)
         hi = target * (1.0 + self._adj.tolerance_fraction)
         step = self._adj.step_ms
         direction: str | None = None
 
-        logger.info("Auto-adjusting integration time (target=%.0f counts)", target)
+        logger.info("pH auto-adjusting integration time (target=%.0f counts)", target)
 
         for _ in range(self._adj.max_iterations):
             await self._spec.set_integration_time(self._integration_time_ms)
@@ -393,8 +347,3 @@ class CO3MeasurementCycle:
                 break
 
         logger.warning("Auto-adjust did not converge; using %.1f ms", self._integration_time_ms)
-
-    @staticmethod
-    def _mean_result(injections: list[CO3InjectionResult]) -> CO3InjectionResult:
-        """Return the first injection (extend to mean/regression if n_cycles > 1)."""
-        return injections[0]

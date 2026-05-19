@@ -1,12 +1,15 @@
 """
-run_single_measurement.py — entry point for a single CO3 measurement cycle.
+run_single_measurement.py — entry point for a single CO3 or pH measurement cycle.
 
 Usage
 -----
 From the project root:
 
-    # Mock hardware (default — works on any computer):
+    # CO3 — mock hardware (default, works on any computer):
     uv run scripts/run_single_measurement.py
+
+    # pH — mock hardware:
+    uv run scripts/run_single_measurement.py --config-name ph_config
 
     # Real hardware on Raspberry Pi:
     uv run scripts/run_single_measurement.py hardware.use_mock=false
@@ -34,7 +37,8 @@ from omegaconf import DictConfig, OmegaConf
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from co3_instrument.api import CO3InstrumentAPI
-from co3_instrument.storage.file_storage import FileStorage
+from co3_instrument.ph_api import pHInstrumentAPI
+from co3_instrument.storage.file_storage import CO3FileStorage, pHFileStorage
 
 logger = logging.getLogger(__name__)
 
@@ -48,30 +52,35 @@ _DEFAULT_SALINITY = 35.0
     config_name="config",
 )
 def main(cfg: DictConfig) -> None:
-    """Hydra entry point — runs one complete CO3 measurement cycle."""
+    """Hydra entry point — runs one complete CO3 or pH measurement cycle."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    # Resolve salinity: allow override via cfg.measurement.salinity (not in
-    # default config) or fall back to the hardcoded default.
+    instrument_type: str = str(
+        OmegaConf.select(cfg, "instrument_type", default="co3")
+    ).lower()
+
     salinity: float = float(
         OmegaConf.select(cfg, "measurement.salinity", default=_DEFAULT_SALINITY)
     )
 
     logger.info("=" * 60)
-    logger.info("CO3 Instrument — Single Measurement")
+    logger.info("%s Instrument — Single Measurement", instrument_type.upper())
     logger.info("  hardware.use_mock = %s", cfg.hardware.use_mock)
     logger.info("  salinity          = %.3f PSU", salinity)
     logger.info("  n_cycles          = %d", cfg.measurement.n_cycles)
     logger.info("  time_acceleration = %dx", cfg.measurement.time_acceleration)
     logger.info("=" * 60)
 
-    asyncio.run(_async_main(cfg, salinity))
+    if instrument_type == "ph":
+        asyncio.run(_async_main_ph(cfg, salinity))
+    else:
+        asyncio.run(_async_main_co3(cfg, salinity))
 
 
-async def _async_main(cfg: DictConfig, salinity: float) -> None:
+async def _async_main_co3(cfg: DictConfig, salinity: float) -> None:
     async with CO3InstrumentAPI.from_config(cfg) as api:
         # ── Optional: show live spectrum before measuring ──────────────
         logger.info("Capturing pre-measurement spectrum…")
@@ -86,7 +95,7 @@ async def _async_main(cfg: DictConfig, salinity: float) -> None:
         # ── Run the measurement ───────────────────────────────────────
         result = await api.run_single_measurement(
             salinity=salinity,
-            flush_before=False,  # set True to flush before measuring
+            flush_before=False,
         )
 
         # ── Print results ─────────────────────────────────────────────
@@ -111,9 +120,57 @@ async def _async_main(cfg: DictConfig, salinity: float) -> None:
         print()
 
         # ── Save to disk ───────────────────────────────────────────────
-        storage = FileStorage(cfg.output.base_path)
+        storage = CO3FileStorage(cfg.output.base_path)
         storage.save(result)
         logger.info("Results saved to %s/data_co3/", cfg.output.base_path)
+
+
+async def _async_main_ph(cfg: DictConfig, salinity: float) -> None:
+    async with pHInstrumentAPI.from_config(cfg) as api:
+        # ── Show live spectrum before measuring ────────────────────────
+        logger.info("Capturing pre-measurement spectrum…")
+        api.turn_on_leds()
+        spectrum = await api.get_spectrum()
+        logger.info(
+            "  Peak intensity: %.0f counts at pixel %d",
+            spectrum.max(), int(spectrum.argmax()),
+        )
+
+        # ── Run the measurement ───────────────────────────────────────
+        result = await api.run_single_measurement(
+            salinity=salinity,
+            flush_before=False,
+        )
+
+        # ── Print results ─────────────────────────────────────────────
+        dye = result.dye
+        wl2 = 578 if dye == "MCP" else 596
+        print()
+        print("─" * 60)
+        print("  pH MEASUREMENT RESULT")
+        print("─" * 60)
+        print(f"  pH cuvette  = {result.pH_cuvette:>10.4f}")
+        print(f"  pH in-situ  = {result.pH_insitu:>10.4f}")
+        print(f"  r²          = {result.r_square:>10.4f}")
+        print(f"  T cuvette   = {result.t_cuvette:>10.3f}  °C")
+        print(f"  S input     = {result.salinity_input:>10.3f}  PSU")
+        print(f"  S corrected = {result.salinity_corrected:>10.3f}  PSU")
+        print(f"  A1 (434 nm) = {result.a1:>10.5f}")
+        print(f"  A2 ({wl2} nm) = {result.a2:>10.5f}")
+        print(f"  A NIR       = {result.a_nir:>10.5f}")
+        print(f"  R ratio     = {result.r_ratio:>10.4f}")
+        print(f"  e1          = {result.e1:>10.6f}")
+        print(f"  e2e3        = {result.e2e3:>10.6f}")
+        print(f"  pK          = {result.pK:>10.6f}")
+        print(f"  Dye         = {result.dye}")
+        print(f"  Timestamp   = {result.timestamp.isoformat(timespec='seconds')}")
+        print("─" * 60)
+        print()
+
+        # ── Save to disk ───────────────────────────────────────────────
+        storage = pHFileStorage(cfg.output.base_path)
+        storage.save(result)
+        logger.info("Results saved to %s/data_pH/", cfg.output.base_path)
 
 
 if __name__ == "__main__":

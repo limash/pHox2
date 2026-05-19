@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Instrument type
 # ──────────────────────────────────────────────────────────────────────────────
-instrument_type: co3
+instrument_type: ph
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Hardware backend selection
@@ -10,34 +10,31 @@ hardware:
   use_mock: true          # set to false on real Raspberry Pi instrument
 
 # ──────────────────────────────────────────────────────────────────────────────
-# GPIO pin assignments (BCM numbering)
+# GPIO pin assignments (BCM numbering, shared with CO3 except light/shutter)
 # ──────────────────────────────────────────────────────────────────────────────
 gpio:
   # Bistable inlet valve — [enable, channel_1, channel_2]
   valve_enable_pin: 24
   valve_ch1_pin: 23
   valve_ch2_pin: 25
-  valve_toggle_duration_s: 0.3   # pulse duration to flip the bistable valve
+  valve_toggle_duration_s: 0.3
 
   water_pump_pin: 21             # sample flush pump relay
   dye_pump_pin: 19               # dye solenoid pump relay
   stirrer_pin: 20                # magnetic stirrer relay
   drain_pin: 16                  # drain valve relay
-  air_pin: 26                    # compressed-air pump relay (pushes liquid)
-  light_pin: 17                  # UV lamp relay
-  shutter_pin: 27                # mechanical shutter relay
+  air_pin: 26                    # compressed-air pump relay
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ADC (ADCDifferentialPi, I²C)
 # ──────────────────────────────────────────────────────────────────────────────
 adc:
-  temperature_channel: 8         # ADC channel connected to the temperature probe
+  temperature_channel: 8
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Temperature probe
 # ──────────────────────────────────────────────────────────────────────────────
 temperature:
-  # T_cuvette (°C) = coef[0] * voltage + coef[1]
   calibration_coefficients: [-1.234, 15.678]
   n_averages: 3
 
@@ -47,21 +44,39 @@ temperature:
 spectrometer:
   integration_time_ms: 18.0
   n_averages: 6
-  light_threshold_counts: 60000  # target intensity for auto-adjust
+  light_threshold_counts: 60000
   autoadjust:
     enabled: true
-    tolerance_fraction: 0.05     # ±5 % around target
+    tolerance_fraction: 0.05
     max_iterations: 20
-    step_ms: 500                 # integration-time step during binary search
+    step_ms: 500
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CO3 chemistry
+# pH chemistry
 # ──────────────────────────────────────────────────────────────────────────────
-co3:
-  wavelength_1_nm: 234.0    # main absorbance peak  (A1)
-  wavelength_2_nm: 250.0    # secondary peak         (A2)
-  wavelength_3_nm: 350.0    # reference baseline     (A3)
-  dye: "Pb_perchlor"        # Pb_perchlor | Pb_chlor
+ph:
+  # Dye indicator: MCP (m-Cresol Purple) or TB (Thymol Blue)
+  dye: "MCP"
+
+  # Wavelengths (nm) — matched to dye choice
+  wavelength_1_nm: 434.0    # acid-form peak (same for MCP and TB)
+  wavelength_2_nm: 578.0    # base-form peak (578 MCP / 596 TB)
+  nir_nm: 730.0             # NIR reference (baseline correction)
+
+  # LED PWM pins (BCM) — [Blue 434 nm, Orange 578 nm, Red 730 nm, spare]
+  led_slots: [12, 13, 19, 16]
+
+  # Initial LED duty cycles (0–100 %) at instrument start
+  led_duties: [55, 55, 55, 0]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tris buffer calibration
+# ──────────────────────────────────────────────────────────────────────────────
+tris_buffer:
+  salinity: 35                   # salinity of Tris calibration solution
+  temperature: 20                # nominal calibration temperature (°C)
+  calibration_threshold: 0.005   # max |ΔpH| between measured and theoretical
+  pump_time_s: 30                # seconds to pump calibration solution
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Measurement cycle
@@ -69,16 +84,13 @@ co3:
 measurement:
   cuvette_volume_ml: 16.0
   dye_volume_per_shot_ml: 0.03
-  dye_n_shots: 6             # solenoid pulses per injection event
-  n_cycles: 1                # dye injection + absorbance cycles per measurement
-  mix_time_s: 10.0           # stirring time after dye injection
-  wait_time_s: 5.0           # settling time after stirrer stops
-  pump_time_s: 60.0          # sample flush duration before measurement
-  drain_after: true          # drain cuvette after each measurement
+  dye_n_shots: 6
+  n_cycles: 4                    # 4 injections for multi-injection regression
+  mix_time_s: 10.0
+  wait_time_s: 5.0
+  pump_time_s: 60.0
+  drain_after: true
   drain_time_s: 60.0
-
-  # Divide all asyncio.sleep durations by this factor.
-  # Set > 1 (e.g. 100) for fast mock runs; leave at 1 for real hardware.
   time_acceleration: 100
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -94,7 +106,7 @@ output:
   base_path: "~/co3_data"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Hydra — keep output in a fixed directory so the script is reproducible
+# Hydra
 # ──────────────────────────────────────────────────────────────────────────────
 hydra:
   run:

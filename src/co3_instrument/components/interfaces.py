@@ -87,3 +87,19 @@ class ITemperatureSensor(ABC):
     @abstractmethod
     def read_temperature(self) -> float:
         """Return cuvette temperature in degrees Celsius."""
+
+
+class ILEDArray(ABC):
+    """Multi-channel LED array (used by pH instrument)."""
+
+    @abstractmethod
+    def turn_on(self) -> None:
+        """Apply the configured duty cycles to all LED channels."""
+
+    @abstractmethod
+    def turn_off(self) -> None:
+        """Set all LED channels to zero duty cycle (dark)."""
+
+    @abstractmethod
+    def set_duty_cycle(self, channel: int, duty: int) -> None:
+        """Set PWM duty cycle for *channel* (0-based index; 0–100)."""
