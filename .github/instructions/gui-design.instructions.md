@@ -199,7 +199,7 @@ All buttons are **toggles** (on/off) except where noted. All disabled by default
 
 **Dye pump behaviour**: clicking fires 3 shots, then the button automatically resets to off. After pumping, capture and display a fresh spectrum in Plot 1.
 
-**Drain behaviour**: closing the drain first requires the inlet valve to be closed; if it is open, close it first, then drain, then re-open (for pH) or leave closed (for CO3).
+**Drain behaviour**: closing the drain first requires the inlet valve to be closed; if it is open, close it first, then drain, then re-open the valve.
 
 ### LED control group (group box "LED values") — pH only
 
