@@ -67,3 +67,14 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## 5. Keep Instructions in Sync
+
+**When you change instrument logic or GUI design, update the matching instruction file.**
+
+| Change type | Instruction file to update |
+|-------------|---------------------------|
+| Hardware interfaces, measurement physics, config schema, data models, API methods, communication layer | `.github/instructions/instrument-logic.instructions.md` |
+| GUI layout, views, tabs, plots, live data, manual controls, mode state machine | `.github/instructions/gui-design.instructions.md` |
+
+Update the instruction **in the same task** as the code change, not as a follow-up. If the code change makes a section of the instruction stale or wrong, rewrite that section. If it adds a new subsystem, add a matching section.

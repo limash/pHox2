@@ -19,7 +19,8 @@ The codebase follows dependency inversion and interface-segregation principles. 
 ```
 configs/config.yaml              ← Hydra/OmegaConf configuration
         │
-InstrumentFactory.build_cycle()  ← wires concrete → abstract; selects mock vs. real
+InstrumentFactory.build_cycle()           ← wires concrete → abstract; selects mock vs. real
+InstrumentFactory.build_ferrybox_client() ← selects FerryboxUDPClient or NullFerryboxClient
         │
 CO3MeasurementCycle              ← orchestrates the measurement sequence
   ├── ISpectrometer
@@ -34,6 +35,7 @@ CO3MeasurementCycle              ← orchestrates the measurement sequence
   └── CO3Calculator
         │
 CO3InstrumentAPI                 ← public surface used by GUI and scripts
+  └── IFerryboxClient            ← UDP comm: FerryboxUDPClient | NullFerryboxClient | MockFerryboxClient
         │
 FileStorage                      ← writes .spt / .evl / .log to disk (external)
 ```
@@ -128,6 +130,17 @@ Config is loaded via **Hydra/OmegaConf** from `configs/config.yaml`. Access the 
 | Key | Type | Example | Description |
 |-----|------|---------|-------------|
 | `base_path` | str | `"~/co3_data"` | Root directory for `FileStorage` output |
+
+### `ferrybox` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Activate UDP Ferrybox communication; `false` → `NullFerryboxClient` |
+| `host` | str | `"192.168.1.100"` | IP address or hostname of the Ferrybox |
+| `ferrybox_port` | int | `5556` | UDP port the Ferrybox listens on (instrument → Ferrybox) |
+| `local_port` | int | `5555` | Local UDP port to bind for receiving Ferrybox data (Ferrybox → instrument) |
+
+`InstrumentFactory.build_ferrybox_client(cfg)` reads this section and returns either a `FerryboxUDPClient` or a `NullFerryboxClient` (when the section is absent or `enabled: false`).
 
 ---
 
@@ -470,35 +483,70 @@ Handled by `IDrain.drain(duration_s)`. Internally activates drain relay then air
 Priority order:
 1. Manual input (used for single/manual measurements; not for continuous or calibration)
 2. Calibration mode: always uses `TrisBuffer.S_tris_buffer` (= 35)
-3. Continuous mode: `udp.FERRYBOX["salinity"]` (real-time from Ferrybox UDP)
+3. Continuous mode: `api.get_ferrybox_data().salinity` (real-time from `IFerryboxClient`; requires `ferrybox.enabled: true`)
 
 ---
 
-## UDP Communication (`udp.py`)
+## UDP Communication (`phox2.communication`)
 
-> **Not yet implemented in the current codebase.** The spec below defines the intended future module.
+Ferrybox communication is fully implemented using `asyncio.DatagramProtocol` with dependency injection. All classes are in `src/phox2/communication/`.
 
-Two background threads (start automatically on import):
-- **Receiver** listens on port `56800` for `$PFBOX,...` datagrams from Ferrybox
-- **Sender** broadcasts on port `56801` (or config `UDP_SEND`) `DATA_STRING` every 10 s
+### Abstractions (`communication/interfaces.py` and `communication/models.py`)
 
-Parsed Ferrybox fields populated into `udp.FERRYBOX` dict:
+**`IFerryboxClient`** (abstract base class) — the only type the instrument APIs (`CO3InstrumentAPI`, `pHInstrumentAPI`) ever reference:
 
-| Key | Source message prefix |
-|-----|-----------------------|
-| `salinity` | `$PFBOX,SAL,` |
-| `temperature` | `$PFBOX,TEMP,` |
-| `pumping` | `$PFBOX,PUMP,` (int: 0=off, 1=on) |
-| `latitude` | `$PFBOX,LAT,` |
-| `longitude` | `$PFBOX,LON,` |
-| `udp_ok` | True if last recv was within 1 s |
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `start` | `async () → None` | Bind UDP socket and begin listening |
+| `stop` | `async () → None` | Close UDP socket and release resources |
+| `get_latest_data` | `() → FerryboxData \| None` | Sync read of last received packet (no I/O) |
+| `send_result` | `async (IUDPPayload) → None` | Serialise and transmit result to Ferrybox (fire-and-forget) |
 
-Data string formats (written to `udp.DATA_STRING`):
-```
-pH:  "$PPHOX,{version},{row_csv},*\n"
-CO3: "$PCO3,{version},{row_csv},*\n"
-```
-Default `DATA_STRING = '$PHOX,-998'` until first measurement.
+**`FerryboxData`** (frozen dataclass) — represents one received Ferrybox packet:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `salinity` | `float` | In-situ salinity (PSU) |
+| `timestamp` | `datetime` | UTC time the packet was received |
+| `temperature` | `float \| None` | Optional sea-surface temperature (°C) |
+
+**`IUDPPayload`** (runtime-checkable Protocol) — any measurement result that implements `to_udp_payload() → dict` satisfies this; no inheritance needed.
+
+### Concrete classes (`communication/udp_client.py`)
+
+**`FerryboxUDPClient`** — real asyncio UDP implementation:
+- Constructor: `FerryboxUDPClient(ferrybox_host, ferrybox_port, local_port)`
+- Binds `0.0.0.0:{local_port}` for incoming Ferrybox packets; sends to `{ferrybox_host}:{ferrybox_port}`
+- Incoming packet format (UTF-8 JSON, newline-delimited):
+  ```json
+  {"type": "ferrybox_data", "salinity": 35.012, "temperature": 18.5}
+  ```
+  Packets with a missing or non-`"ferrybox_data"` `type` field are silently discarded.
+  `temperature` is optional; missing/malformed values are treated as `None`.
+- Outgoing: `json.dumps(result.to_udp_payload()) + "\n"` sent to the Ferrybox. Errors are logged but not raised.
+
+**`NullFerryboxClient`** — no-op used when `ferrybox.enabled: false`. All methods do nothing; `get_latest_data()` always returns `None`.
+
+### Mock classes (`communication/mock/`)
+
+**`MockFerryboxClient`** (`mock/client.py`) — in-memory stub for unit tests. Constructor: `MockFerryboxClient(preset_data=None)`. Attributes: `sent_payloads: list[dict]`, `started: bool`, `stopped: bool`. Use `set_preset_data(data)` to change the value returned by `get_latest_data()` at runtime.
+
+**`MockFerryboxDevice`** (`mock/device.py`) — async UDP server that simulates the *Ferrybox side*. Broadcasts synthetic `ferrybox_data` JSON packets at a configurable interval and collects result datagrams sent by the instrument into `received_results: list[dict]`. Run as a standalone process with `python -m phox2.communication.mock.device`.
+
+### Factory wiring
+
+`InstrumentFactory.build_ferrybox_client(cfg)` returns:
+- `FerryboxUDPClient(host, ferrybox_port, local_port)` when `ferrybox.enabled: true`
+- `NullFerryboxClient()` when the `ferrybox` section is absent or `enabled: false`
+
+### Integration in `CO3InstrumentAPI`
+
+| Lifecycle hook | Action |
+|----------------|--------|
+| `connect()` | `await self._ferrybox.start()` |
+| `disconnect()` | `await self._ferrybox.stop()` |
+| `run_single_measurement()` | `await self._ferrybox.send_result(result)` after the cycle completes |
+| `get_ferrybox_data()` | `return self._ferrybox.get_latest_data()` (sync) |
 
 ---
 
@@ -596,17 +644,24 @@ Suggested decimal places for formatted output:
 To implement a standalone (GUI-free) module for the CO3 instrument:
 
 1. **Load config**: `cfg = OmegaConf.load("configs/config.yaml")`
-2. **Build cycle**: `cycle = InstrumentFactory.build_cycle(cfg)` (selects mock or real hardware automatically via `hardware.use_mock`)
-3. **Create API**: `api = CO3InstrumentAPI(cycle)`
-4. **Connect**: `await api.connect()` (resolves pixel indices; idempotent)
+2. **Build API** (preferred): `api = CO3InstrumentAPI.from_config(cfg)` — wires hardware, calculator, **and** Ferrybox client automatically
+3. **Connect**: `await api.connect()` (resolves pixel indices; starts Ferrybox UDP socket if enabled; idempotent)
+4. **Salinity**: pass manually, or read from `api.get_ferrybox_data().salinity` when `ferrybox.enabled: true`
 5. **Run measurement**: `result = await api.run_single_measurement(salinity, flush_before=True)`
 6. **Save**: `FileStorage(cfg.output.base_path).save(result)`
-7. **Disconnect**: `await api.disconnect()`
+7. **Disconnect**: `await api.disconnect()` (stops Ferrybox UDP socket)
 
 Use the async context manager for safe resource handling:
 ```python
 async with CO3InstrumentAPI.from_config(cfg) as api:
     result = await api.run_single_measurement(35.0, flush_before=True)
+```
+
+Alternatively, wire pieces manually (e.g. for testing with a mock Ferrybox client):
+```python
+cycle = InstrumentFactory.build_cycle(cfg)
+ferrybox = MockFerryboxClient(preset_data=FerryboxData(salinity=35.0, timestamp=datetime.now()))
+api = CO3InstrumentAPI(cycle, ferrybox_client=ferrybox)
 ```
 
 ---
@@ -620,6 +675,7 @@ async with CO3InstrumentAPI.from_config(cfg) as api:
 | `await run_single_measurement(salinity, flush_before)` | async | Full CO3 measurement cycle |
 | `await get_spectrum()` | async | Single spectrum capture (live display) |
 | `get_temperature()` | sync | Current cuvette temperature (°C) |
+| `get_ferrybox_data()` | sync | Latest `FerryboxData` from Ferrybox, or `None` if none received yet |
 | `await open_valve()` | async | Open inlet valve |
 | `await close_valve()` | async | Close inlet valve |
 | `turn_on_light()` | sync | Switch UV lamp on |
