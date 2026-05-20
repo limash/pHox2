@@ -88,6 +88,10 @@ class ITemperatureSensor(ABC):
     def read_temperature(self) -> float:
         """Return cuvette temperature in degrees Celsius."""
 
+    @abstractmethod
+    def read_voltage(self) -> float:
+        """Return the raw averaged ADC voltage (used for live display and EVL logging)."""
+
 
 class ILEDArray(ABC):
     """Multi-channel LED array (used by pH instrument)."""

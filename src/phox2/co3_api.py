@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from types import TracebackType
 from typing import Type
 
@@ -121,6 +122,7 @@ class CO3InstrumentAPI:
         self,
         salinity: float,
         flush_before: bool = False,
+        on_step: Callable[[str], None] | None = None,
     ) -> CO3MeasurementResult:
         """
         Run a complete CO3 measurement cycle.
@@ -133,16 +135,30 @@ class CO3InstrumentAPI:
         flush_before:
             If True, run the water pump before measuring to flush stale
             sample out of the cuvette.
+        on_step:
+            Optional callback invoked at the start of each named cycle step
+            (``"adjusting_light"``, ``"dark_blank"``, ``"measurement_N"``).
+            Use this to drive progress-tracker widgets in the GUI.
 
         Returns
         -------
         MeasurementResult
             Immutable dataclass containing concentration, temperature,
-            absorbance values, intermediate chemistry, and raw spectra.
+            absorbance values, intermediate chemistry, raw spectra, and
+            the Ferrybox snapshot taken at measurement start.
         """
         self._require_connected()
+        fb = self._ferrybox.get_latest_data()
+        fb_temp = fb.temperature if fb is not None else None
+        fb_sal = fb.salinity if fb is not None else None
         logger.info("Starting single CO3 measurement (S=%.3f)", salinity)
-        result = await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        result = await self._cycle.run(
+            salinity=salinity,
+            flush_before=flush_before,
+            fb_temp=fb_temp,
+            fb_sal=fb_sal,
+            on_step=on_step,
+        )
         await self._ferrybox.send_result(result)
         return result
 
@@ -163,7 +179,7 @@ class CO3InstrumentAPI:
     def wavelengths(self) -> np.ndarray:
         """Spectrometer wavelength array (nm), one element per pixel."""
         self._require_connected()
-        return self._wavelengths.copy()  # type: ignore[union-attr]
+        return self._wavelengths.copy()  # type: ignore[union-attr]  # pyright: ignore[reportOptionalMemberAccess]
 
     async def get_spectrum(self) -> np.ndarray:
         """
@@ -178,7 +194,10 @@ class CO3InstrumentAPI:
         """Return the current in-cuvette temperature (°C)."""
         self._require_connected()
         return self._cycle._temp.read_temperature()
-
+    def get_voltage(self) -> float:
+        """Return the current raw ADC voltage from the temperature probe."""
+        self._require_connected()
+        return self._cycle._temp.read_voltage()
     # ── Manual control API (for GUI manual-control panel) ─────────────────
 
     async def open_valve(self) -> None:

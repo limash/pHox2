@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -178,6 +179,9 @@ class CO3MeasurementCycle:
         self,
         salinity: float,
         flush_before: bool = False,
+        fb_temp: float | None = None,
+        fb_sal: float | None = None,
+        on_step: Callable[[str], None] | None = None,
     ) -> CO3MeasurementResult:
         """
         Execute a complete CO3 measurement cycle.
@@ -189,6 +193,15 @@ class CO3MeasurementCycle:
         flush_before:
             If True, run the water pump for pump_time_s before measuring
             to flush the sample chamber.
+        fb_temp:
+            Ferrybox sea-surface temperature (°C) at measurement start, or None.
+        fb_sal:
+            Ferrybox salinity (PSU) at measurement start, or None.
+        on_step:
+            Optional callback invoked at the start of each named step.  The
+            string argument matches the GUI progress-tracker labels:
+            ``"adjusting_light"``, ``"dark_blank"``, ``"measurement_N"``
+            (N is 1-based).
         """
         if self._wavelengths is None:
             raise RuntimeError("Call initialise() before run().")
@@ -206,6 +219,8 @@ class CO3MeasurementCycle:
 
         # ── 2. Auto-adjust integration time ─────────────────────────────
         if self._adj.enabled:
+            if on_step:
+                on_step("adjusting_light")
             await self._auto_adjust_integration_time()
 
         # Reset spectrometer call-sequence state AFTER autoadjust so that the
@@ -214,6 +229,8 @@ class CO3MeasurementCycle:
 
         # ── 3. Dark measurement ──────────────────────────────────────────
         logger.info("Step: dark measurement")
+        if on_step:
+            on_step("dark_blank")
         self._shutter.close()
         await self._sleep(1.0)
         dark = await self._spec.get_intensities()
@@ -229,6 +246,8 @@ class CO3MeasurementCycle:
         injection_spectra: dict[int, np.ndarray] = {}
 
         for n in range(self._mcfg.n_cycles):
+            if on_step:
+                on_step(f"measurement_{n + 1}")
             inj_result, post_inj_sp = await self._injection_cycle(
                 n=n,
                 salinity=salinity,
@@ -276,6 +295,8 @@ class CO3MeasurementCycle:
             dye=self._co3.dye,
             injections=tuple(injections),
             spectra=spectral,
+            fb_temp=fb_temp,
+            fb_sal=fb_sal,
         )
         logger.info(result.summary())
         return result

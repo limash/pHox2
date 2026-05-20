@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -135,6 +136,9 @@ class pHMeasurementCycle:
         self,
         salinity: float,
         flush_before: bool = False,
+        fb_temp: float | None = None,
+        fb_sal: float | None = None,
+        on_step: Callable[[str], None] | None = None,
     ) -> pHMeasurementResult:
         """
         Execute a complete pH measurement cycle.
@@ -145,6 +149,14 @@ class pHMeasurementCycle:
             In-situ salinity (PSU) used for dilution correction.
         flush_before:
             If True, run the water pump for pump_time_s before measuring.
+        fb_temp:
+            Ferrybox sea-surface temperature (°C) at measurement start, or None.
+        fb_sal:
+            Ferrybox salinity (PSU) at measurement start, or None.
+        on_step:
+            Optional callback invoked at the start of each named step:
+            ``"adjusting_light"``, ``"dark_blank"``, ``"injection_N"``
+            (N is 1-based).
         """
         if self._wavelengths is None:
             raise RuntimeError("Call initialise() before run().")
@@ -162,12 +174,16 @@ class pHMeasurementCycle:
 
         # ── 2. Auto-adjust integration time ─────────────────────────────
         if self._adj.enabled:
+            if on_step:
+                on_step("adjusting_light")
             await self._auto_adjust_integration_time()
 
         self._spec.reset_measurement_state()
 
         # ── 3. Dark measurement (LEDs off) ───────────────────────────────
         logger.info("Step: dark measurement")
+        if on_step:
+            on_step("dark_blank")
         self._leds.turn_off()
         await self._sleep(1.0)
         dark = await self._spec.get_intensities()
@@ -183,6 +199,8 @@ class pHMeasurementCycle:
         injection_spectra: dict[int, np.ndarray] = {}
 
         for n in range(self._mcfg.n_cycles):
+            if on_step:
+                on_step(f"injection_{n + 1}")
             inj_result, post_inj_sp = await self._injection_cycle(
                 n=n,
                 salinity=salinity,
@@ -237,6 +255,8 @@ class pHMeasurementCycle:
             dye=self._ph.dye,
             injections=tuple(injections),
             spectra=spectral,
+            fb_temp=fb_temp,
+            fb_sal=fb_sal,
         )
         logger.info(result.summary())
         return result

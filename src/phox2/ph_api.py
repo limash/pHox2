@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from types import TracebackType
 from typing import Type
 
@@ -115,6 +116,7 @@ class pHInstrumentAPI:
         self,
         salinity: float,
         flush_before: bool = False,
+        on_step: Callable[[str], None] | None = None,
     ) -> pHMeasurementResult:
         """
         Run a complete pH measurement cycle.
@@ -126,16 +128,30 @@ class pHInstrumentAPI:
         flush_before:
             If True, run the water pump before measuring to flush stale
             sample out of the cuvette.
+        on_step:
+            Optional callback invoked at the start of each named cycle step
+            (``"adjusting_light"``, ``"dark_blank"``, ``"injection_N"``).
+            Use this to drive progress-tracker widgets in the GUI.
 
         Returns
         -------
         pHMeasurementResult
             Immutable dataclass with pH_cuvette, pH_insitu, regression stats,
-            temperature, per-injection details, and raw spectra.
+            temperature, per-injection details, raw spectra, and the Ferrybox
+            snapshot taken at measurement start.
         """
         self._require_connected()
+        fb = self._ferrybox.get_latest_data()
+        fb_temp = fb.temperature if fb is not None else None
+        fb_sal = fb.salinity if fb is not None else None
         logger.info("Starting single pH measurement (S=%.3f)", salinity)
-        result = await self._cycle.run(salinity=salinity, flush_before=flush_before)
+        result = await self._cycle.run(
+            salinity=salinity,
+            flush_before=flush_before,
+            fb_temp=fb_temp,
+            fb_sal=fb_sal,
+            on_step=on_step,
+        )
         await self._ferrybox.send_result(result)
         return result
 
@@ -156,7 +172,7 @@ class pHInstrumentAPI:
     def wavelengths(self) -> np.ndarray:
         """Spectrometer wavelength array (nm), one element per pixel."""
         self._require_connected()
-        return self._wavelengths.copy()  # type: ignore[union-attr]
+        return self._wavelengths.copy()  # type: ignore[union-attr]  # pyright: ignore[reportOptionalMemberAccess]
 
     async def get_spectrum(self) -> np.ndarray:
         """Capture a single spectrum from the spectrometer."""
@@ -167,7 +183,10 @@ class pHInstrumentAPI:
         """Return the current in-cuvette temperature (°C)."""
         self._require_connected()
         return self._cycle._temp.read_temperature()
-
+    def get_voltage(self) -> float:
+        """Return the current raw ADC voltage from the temperature probe."""
+        self._require_connected()
+        return self._cycle._temp.read_voltage()
     # ── LED manual controls ───────────────────────────────────────────────
 
     def turn_on_leds(self) -> None:
@@ -216,7 +235,15 @@ class pHInstrumentAPI:
         """Drain the cuvette for *duration_s* seconds (defaults to config value)."""
         d = duration_s if duration_s is not None else self._cycle._mcfg.drain_time_s
         await self._cycle._drain.drain(d)
+    async def auto_adjust_integration_time(self) -> None:
+        """
+        Run the LED auto-adjustment routine.
 
+        Performs a binary search on integration time to bring the target
+        pixel intensity within the configured tolerance band.
+        """
+        self._require_connected()
+        await self._cycle._auto_adjust_integration_time()
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _require_connected(self) -> None:

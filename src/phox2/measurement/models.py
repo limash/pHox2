@@ -86,6 +86,10 @@ class CO3MeasurementResult:
     injections: tuple[CO3InjectionResult, ...]
     spectra: SpectralData
 
+    # ── Ferrybox snapshot at measurement time ────────────────────────────
+    fb_temp: float | None = None   # °C (sea-surface, from UDP)
+    fb_sal: float | None = None    # PSU (from UDP)
+
     def summary(self) -> str:
         return (
             f"CO3 = {self.co3_umol_per_kg:.1f} µmol/kg | "
@@ -95,7 +99,7 @@ class CO3MeasurementResult:
             f"timestamp = {self.timestamp.isoformat(timespec='seconds')}"
         )
 
-    def to_udp_payload(self) -> dict:
+    def to_udp_payload(self) -> dict[str, object]:
         """Return a JSON-serialisable dict for transmission over UDP."""
         return {
             "type": "co3_result",
@@ -169,6 +173,10 @@ class pHMeasurementResult:
     injections: tuple[pHInjectionResult, ...]
     spectra: SpectralData
 
+    # ── Ferrybox snapshot at measurement time ────────────────────────────
+    fb_temp: float | None = None   # °C (sea-surface, from UDP)
+    fb_sal: float | None = None    # PSU (from UDP)
+
     def summary(self) -> str:
         return (
             f"pH_cuvette = {self.pH_cuvette:.4f} | "
@@ -179,7 +187,7 @@ class pHMeasurementResult:
             f"timestamp = {self.timestamp.isoformat(timespec='seconds')}"
         )
 
-    def to_udp_payload(self) -> dict:
+    def to_udp_payload(self) -> dict[str, object]:
         """Return a JSON-serialisable dict for transmission over UDP."""
         return {
             "type": "ph_result",
