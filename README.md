@@ -1,15 +1,25 @@
-# CO3 Seawater Spectrophotometric Instrument
+# phox2 — Seawater Spectrophotometric Instrument
 
-A modular Python package for autonomous CO3 seawater carbonate measurement using spectrophotometry. Supports both mock hardware (for development/testing) and real hardware deployment on Raspberry Pi.
+A modular Python package for autonomous **pH and CO₃²⁻ (carbonate)** seawater measurement using spectrophotometry. Supports both mock hardware (for development/testing) and real hardware deployment on Raspberry Pi.
 
 ## Overview
 
-This instrument measures seawater carbonate ion (CO3²⁻) concentration using optical spectroscopy combined with pH-indicator dyes. The package handles:
+phox2 runs two instrument types from the same codebase, selected by config file:
 
-- **Hardware control**: pumps, valves, spectrometer, ADC, temperature probes, and relays
-- **Measurement cycles**: automated sample preparation, equilibration, and optical measurement
+| Instrument | Measures | Dye | Wavelengths |
+|------------|----------|-----|-------------|
+| **CO₃** | Carbonate ion (µmol/kg) | Pb(ClO₄)₂ or Pb(Cl)₂ | 234, 250, 350 nm (UV) |
+| **pH** | Seawater pH (total scale) | MCP or TB | 434, 578/596, 730 nm (VIS) |
+
+Both instruments share the same fluidic hardware (pumps, bistable valve, stirrer, drain, temperature ADC, USB spectrometer). The CO₃ instrument adds a UV lamp + mechanical shutter; the pH instrument replaces these with a PWM-controlled LED array.
+
+The package handles:
+
+- **Hardware control**: pumps, valves, spectrometer, ADC, temperature probes, LED array, and relays
+- **Measurement cycles**: automated sample preparation, dye injection, equilibration, and optical measurement
 - **Data acquisition**: spectral data, temperature measurements, and quality control
-- **Configuration management**: hardware pins, calibration coefficients, and measurement parameters
+- **Ferrybox integration**: optional UDP communication for salinity/temperature from a ship Ferrybox system
+- **Configuration management**: hardware pins, calibration coefficients, and measurement parameters via Hydra/OmegaConf
 
 ## Quick Start
 
@@ -26,7 +36,7 @@ Perfect for development, testing, and non-hardware environments.
 
 ```bash
 # Clone/navigate to the repository
-cd /path/to/co3_instrument
+cd /path/to/phox2
 
 # Install in development mode
 uv sync
@@ -35,29 +45,64 @@ uv sync
 pip install -e .
 ```
 
-#### Run a Measurement
+#### Run a Single Measurement
+
+A `--config-name` is always required to select the instrument type:
 
 ```bash
-# Default: uses mock hardware (simulated devices)
-uv run scripts/run_single_measurement.py
+# CO3 instrument — mock hardware:
+uv run scripts/run_single_measurement.py --config-name co3_config
+
+# pH instrument — mock hardware:
+uv run scripts/run_single_measurement.py --config-name ph_config
 ```
 
 The measurement will:
-1. Perform a simulated measurement cycle
-2. Output results to `outputs/<date>/<time>/` with configuration snapshot and logs
-3. Save measurement data to `~/co3_data/`
+1. Perform a simulated measurement cycle (accelerated 100× by default in mock mode)
+2. Write a Hydra config snapshot to `outputs/<date>/<time>/`
+3. Save spectral data, per-injection values, and a summary log to `~/phox_data/data_co3/` or `~/phox_data/data_ph/`
+
+#### Run Continuously
+
+```bash
+# CO3, 5-minute interval (default):
+uv run scripts/run_continuous_measurement.py --config-name co3_config
+
+# pH, custom 2-minute interval:
+uv run scripts/run_continuous_measurement.py --config-name ph_config continuous.interval_s=120
+
+# Stop safely with Ctrl-C — current measurement finishes before exit.
+```
+
+#### Run the GUI
+
+Install the GUI extras and launch the web interface:
+
+```bash
+uv sync --extra gui
+
+# CO3 instrument (mock hardware):
+uv run scripts/run_gui.py --config-name co3_config
+
+# pH instrument (mock hardware):
+uv run scripts/run_gui.py --config-name ph_config
+```
+
+Then open [http://localhost:8000](http://localhost:8000) in your browser.
 
 #### Common Overrides
 
+Any config key can be overridden on the command line:
+
 ```bash
-# Run with custom salinity (default: 35.0 PSU)
-uv run scripts/run_single_measurement.py measurement.salinity=34.5
+# Pass salinity manually (if not reading from Ferrybox):
+uv run scripts/run_single_measurement.py --config-name co3_config measurement.salinity=34.5
 
-# Skip drain cycle (useful for bench testing)
-uv run scripts/run_single_measurement.py measurement.drain_after=false
+# Skip drain cycle (useful during bench testing):
+uv run scripts/run_single_measurement.py --config-name co3_config measurement.drain_after=false
 
-# Override multiple parameters
-uv run scripts/run_single_measurement.py hardware.use_mock=true measurement.salinity=34.2
+# Run at real speed (time_acceleration=1) instead of 100×:
+uv run scripts/run_single_measurement.py --config-name co3_config measurement.time_acceleration=1
 ```
 
 ---
@@ -69,9 +114,9 @@ Instructions for installing and running on real hardware with a Raspberry Pi.
 ### Prerequisites
 
 **Hardware:**
-- Raspberry Pi 4 or later (4GB+ RAM recommended)
+- Raspberry Pi 4 or later (4 GB+ RAM recommended)
 - Freshly imaged Raspberry Pi OS (Bookworm or later)
-- Physical CO3 instrument hardware connected to GPIO pins and I²C
+- Instrument hardware connected to GPIO pins and I²C bus
 
 **Software:**
 - Python 3.11 or later
@@ -97,7 +142,7 @@ sudo apt install -y python3.11 python3.11-venv python3.11-dev build-essential
 The real hardware drivers require system packages:
 
 ```bash
-# For I²C (ADC, spectrometer communication)
+# For I²C (ADC communication)
 sudo apt install -y i2c-tools python3-smbus
 
 # For GPIO and PWM control via pigpio daemon
@@ -107,11 +152,10 @@ sudo apt install -y pigpio python3-pigpio
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 
-# For USB spectrometer (Ocean Insight SeaBreeze)
-# Install libusb for SeaBreeze spectrometer support
+# For USB spectrometer (Ocean Insight / SeaBreeze)
 sudo apt install -y libusb-1.0-0 libusb-1.0-0-dev
 
-# Configure user to access GPIO without sudo
+# Allow the current user to access GPIO without sudo
 sudo usermod -a -G gpio $USER
 # Log out and back in for group changes to take effect
 ```
@@ -134,25 +178,25 @@ i2cdetect -y 1
 
 ```bash
 # Clone or navigate to the repository
-cd /path/to/co3_instrument
+cd /path/to/phox2
 
-# Install with real hardware dependencies
-uv sync --extra hardware
+# Install with real hardware and GUI dependencies
+uv sync --extra hardware --extra gui
 
 # Or with pip:
-pip install -e ".[hardware]"
+pip install -e ".[hardware,gui]"
 ```
 
 #### 6. Update Configuration
 
-Edit `configs/config.yaml` to match your hardware setup:
+Edit `configs/co3_config.yaml` or `configs/ph_config.yaml` to match your hardware:
 
 ```yaml
 hardware:
-  use_mock: false          # Enable real hardware
+  use_mock: false          # use real hardware
 
 gpio:
-  # Verify these match your physical wiring (BCM pin numbers)
+  # BCM pin numbers — verify against your physical wiring
   valve_enable_pin: 24
   valve_ch1_pin: 23
   valve_ch2_pin: 25
@@ -161,14 +205,20 @@ gpio:
   stirrer_pin: 20
   drain_pin: 16
   air_pin: 26
-  light_pin: 17
-  shutter_pin: 27
+  # CO3 only:
+  light_pin: 17            # UV lamp relay
+  shutter_pin: 27          # mechanical shutter relay
+  # pH only (instead of light/shutter):
+  # ph.led_slots: [12, 13, 19, 16]   # PWM pins for LED array
 
 adc:
-  temperature_channel: 8     # I²C channel for temperature ADC
+  temperature_channel: 8   # ADCDifferentialPi channel for temperature probe
 
 spectrometer:
-  integration_time_ms: 18.0  # Adjust for your spectrometer
+  integration_time_ms: 18.0
+
+measurement:
+  time_acceleration: 1     # set to 1 for real hardware (not accelerated)
 ```
 
 #### 7. Test Hardware Communication
@@ -176,30 +226,60 @@ spectrometer:
 Before running measurements, verify hardware is accessible:
 
 ```bash
-# Check GPIO is accessible
-python3 -c "import pigpio; pi = pigpio.pi(); print('GPIO OK')"
+# Check GPIO is accessible via pigpio
+python3 -c "import pigpio; pi = pigpio.pi(); print('GPIO OK' if pi.connected else 'FAILED')"
 
-# Check I²C devices
+# Check I²C devices are visible
 i2cdetect -y 1
 
-# Check spectrometer connection (if USB)
-lsusb | grep "Ocean Insight"
+# Check USB spectrometer connection
+lsusb | grep -i "ocean"
 ```
 
 ### Run a Measurement on Raspberry Pi
 
 ```bash
-# Run with real hardware
-uv run scripts/run_single_measurement.py hardware.use_mock=false
+# Single CO3 measurement with real hardware:
+uv run scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false
 
-# With custom salinity
-uv run scripts/run_single_measurement.py hardware.use_mock=false measurement.salinity=34.5
+# Single pH measurement:
+uv run scripts/run_single_measurement.py --config-name ph_config hardware.use_mock=false
 
-# View help for all configuration options
-uv run scripts/run_single_measurement.py --help
+# With manual salinity override:
+uv run scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false measurement.salinity=34.5
 ```
 
-### Automated Measurements
+### Run the GUI on Raspberry Pi
+
+Launch the web interface with real hardware:
+
+```bash
+# CO3 instrument:
+uv run scripts/run_gui.py --config-name co3_config hardware.use_mock=false
+
+# pH instrument:
+uv run scripts/run_gui.py --config-name ph_config hardware.use_mock=false
+```
+
+The server listens on port 8000. Access it:
+- Locally on the Pi: [http://localhost:8000](http://localhost:8000)
+- From another machine on the same network: `http://<raspberry-pi-ip>:8000`
+
+To find the Pi's IP address:
+
+```bash
+hostname -I
+```
+
+To keep the GUI running after you disconnect from SSH, use `tmux` or `screen`:
+
+```bash
+tmux new -s phox2
+uv run scripts/run_gui.py --config-name co3_config hardware.use_mock=false
+# Detach with Ctrl+B, D
+```
+
+### Automated Continuous Measurements
 
 To run measurements on a schedule, use a cron job:
 
@@ -207,57 +287,75 @@ To run measurements on a schedule, use a cron job:
 # Edit crontab
 crontab -e
 
-# Add a daily measurement at 12:00 UTC (adjust time as needed):
-0 12 * * * cd /path/to/co3_instrument && /usr/bin/python3 -m venv /tmp/co3_venv && \
-  source /tmp/co3_venv/bin/activate && \
-  uv sync --extra hardware && \
-  uv run scripts/run_single_measurement.py hardware.use_mock=false >> ~/co3_instrument.log 2>&1
+# Example: CO3 every hour, log to file
+0 * * * * cd /path/to/phox2 && uv run scripts/run_single_measurement.py \
+  --config-name co3_config hardware.use_mock=false >> ~/phox2.log 2>&1
 ```
 
-Or use a systemd timer for more control (see below for an example setup).
+Or use `run_continuous_measurement.py` directly (handles the loop and Ctrl-C gracefully):
+
+```bash
+uv run scripts/run_continuous_measurement.py --config-name co3_config \
+  hardware.use_mock=false continuous.interval_s=300
+```
 
 ---
 
 ## Configuration
 
-All configuration is managed through `configs/config.yaml` (loaded via Hydra) and can be overridden on the command line.
+Configuration is split by instrument type. Both files follow the same structure and are loaded via Hydra — any key can be overridden on the command line.
+
+| Config file | Instrument |
+|-------------|------------|
+| `configs/co3_config.yaml` | CO₃ carbonate measurement |
+| `configs/ph_config.yaml` | pH measurement |
 
 ### Key Parameters
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `hardware.use_mock` | Use simulated hardware (true) or real hardware (false) | `true` |
-| `measurement.salinity` | Seawater salinity in PSU | `35.0` |
+| Parameter | Description | Default (CO₃ / pH) |
+|-----------|-------------|---------------------|
+| `hardware.use_mock` | Simulated (true) or real hardware (false) | `true` |
+| `measurement.n_cycles` | Dye injection + absorbance cycles per run | `1` / `4` |
+| `measurement.pump_time_s` | Sample flush duration before measurement | `60.0 s` |
+| `measurement.mix_time_s` | Stirring time after dye injection | `10.0 s` |
 | `measurement.drain_after` | Drain cuvette after measurement | `true` |
-| `spectrometer.integration_time_ms` | Spectrometer integration time | `18.0` |
-| `spectrometer.n_averages` | Number of averages per measurement | `6` |
-| `temperature.calibration_coefficients` | Temperature probe calibration | `[-1.234, 15.678]` |
+| `measurement.time_acceleration` | Divide all sleep times by this factor | `100` (mock) |
+| `spectrometer.integration_time_ms` | Spectrometer integration time | `18.0 ms` |
+| `spectrometer.n_averages` | Spectra averaged per reading | `6` |
+| `temperature.calibration_coefficients` | `[slope, intercept]` for ADC→°C conversion | `[-1.234, 15.678]` |
+| `output.base_path` | Root directory for measurement data files | `~/phox_data` |
+| `ferrybox.enabled` | Enable Ferrybox UDP communication | `false` |
 
-See `configs/config.yaml` for all available options.
+See `configs/co3_config.yaml` and `configs/ph_config.yaml` for all available options.
 
 ---
 
 ## Output and Data
 
-### Measurement Outputs
+### Hydra Run Outputs
 
-Each measurement creates an output directory at:
+Each script invocation creates a Hydra output directory:
 ```
 outputs/<YYYY-MM-DD>/<HH-MM-SS>/
+  .hydra/config.yaml    # full configuration snapshot
+  <script>.log          # console log
 ```
 
-Contains:
-- `.hydra/config.yaml` — Full configuration snapshot
-- Measurement logs and data files
+### Measurement Data Files
 
-### Data Storage
+Measurement data is written to `~/phox_data/` (configurable via `output.base_path`):
 
-Measurement data is saved to:
 ```
-~/co3_data/
+~/phox_data/
+  data_co3/
+    CO3.log               # one-row summary appended after each CO3 measurement
+    <timestamp>.spt       # transposed intensity spectra
+    <timestamp>.evl       # per-injection intermediate values
+  data_ph/
+    pH.log
+    <timestamp>.spt
+    <timestamp>.evl
 ```
-
-Includes spectral data, temperature readings, and computed CO3 concentrations.
 
 ---
 
@@ -279,8 +377,8 @@ python3 --version
 
 **GPIO access denied**: Ensure user is in `gpio` group:
 ```bash
-groups $USER  # Should show 'gpio'
-# If not, run: sudo usermod -a -G gpio $USER (then log out and back in)
+groups $USER  # Should include 'gpio'
+# If not: sudo usermod -a -G gpio $USER  (then log out and back in)
 ```
 
 **I²C device not found**: Check I²C is enabled and device is powered:
@@ -291,7 +389,7 @@ i2cdetect -y 1
 
 **Spectrometer not detected**: Verify USB connection and driver:
 ```bash
-lsusb | grep "Ocean Insight"
+lsusb | grep -i "ocean"
 ```
 
 **Permission denied on pigpio**: Ensure pigpiod daemon is running:
@@ -314,28 +412,26 @@ uv run pytest tests/
 ### Project Structure
 
 ```
-co3_instrument/
-├── src/co3_instrument/
-│   ├── api.py              # Main API entry point
-│   ├── factory.py          # Hardware factory (mock/real)
-│   ├── components/         # Hardware abstraction (pump, valve, etc.)
-│   ├── hardware/           # Real and mock hardware drivers
-│   ├── measurement/        # Measurement cycle logic
-│   ├── physics/            # CO3 calculation algorithms
-│   └── storage/            # Data file I/O
+phox2/
+├── src/phox2/
+│   ├── co3_api.py          # CO3InstrumentAPI — public entry point for CO3
+│   ├── ph_api.py           # pHInstrumentAPI  — public entry point for pH
+│   ├── factory.py          # InstrumentFactory — only place that wires concrete hardware
+│   ├── components/         # Higher-level component wrappers (valve, pump, LED, etc.)
+│   ├── hardware/           # ABCs + mock/ and real/ concrete drivers
+│   ├── measurement/        # Cycle orchestration (co3_cycle.py, ph_cycle.py) + frozen dataclass models
+│   ├── physics/            # Pure functions: CO3 and pH calculations (no I/O)
+│   ├── communication/      # IFerryboxClient ABC + FerryboxUDPClient / NullFerryboxClient
+│   ├── storage/            # FileStorage — writes .spt / .evl / .log files
+│   └── gui/                # FastAPI + WebSocket server + Vue 3 SPA
 ├── configs/
-│   └── config.yaml         # Configuration template
+│   ├── co3_config.yaml     # CO3 instrument configuration
+│   └── ph_config.yaml      # pH instrument configuration
 ├── scripts/
-│   └── run_single_measurement.py  # CLI entry point
-└── tests/                  # Test suite
+│   ├── run_single_measurement.py    # Run one CO3 or pH measurement cycle
+│   ├── run_continuous_measurement.py # Run cycles in a loop with configurable interval
+│   └── run_gui.py                   # Launch the FastAPI web GUI
+└── tests/                  # pytest-asyncio integration tests (mock hardware)
 ```
 
 ---
-
-## License
-
-[Your License Here]
-
-## Contact
-
-For questions or issues, contact the instrument team.

@@ -1,80 +1,106 @@
 ---
-description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
+description: Project-specific coding conventions, architecture invariants, and build commands for the phox2 seawater instrument codebase. Load when writing, reviewing, or refactoring any Python module in this repo.
 ---
 
-# Karpathy Guidelines
+# phox2 — Project Guidelines
 
-Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
+Standalone Python module for pH and CO3 seawater spectrophotometric measurement on a Raspberry Pi / Ferrybox system.
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+---
 
-## 1. Think Before Coding
+## Architecture Invariants (SOLID)
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+These rules are non-negotiable. Violating them breaks the mock/real hardware swap.
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+### Dependency Inversion — never import concrete hardware directly
 
-## 2. Simplicity First
+All hardware is accessed through abstract interfaces only:
+- `hardware/interfaces.py` — `IDigitalOutput`, `IAnalogInput`, `IPWMOutput`, `ISpectrometer`
+- `components/interfaces.py` — `IValve`, `IWaterPump`, `IDyePump`, `IStirrer`, `ILightSource`, `IShutter`, `IDrain`, `ITemperatureSensor`
+- `communication/interfaces.py` — `IFerryboxClient`
 
-**Minimum code that solves the problem. Nothing speculative.**
+Concrete implementations live under `hardware/mock/`, `hardware/real/`, and `communication/`. **Only `InstrumentFactory` (`factory.py`) ever imports concrete classes.**
 
-- No features beyond what was asked.
-- Do not implement behavior that was not explicitly requested.
-- Do not replace or remove an existing subsystem unless that exact replacement/removal was explicitly requested.
-- If an additional change seems necessary, ask for user approval before implementing it.
-- If requirements are ambiguous, ask a clarifying question before coding.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
+### Factory is the wiring point
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+`InstrumentFactory` is the single place that selects mock vs. real hardware and wires concrete → abstract. Nothing else should instantiate `MockDigitalOutput`, `PigpioDigitalOutput`, etc.
 
-## 3. Surgical Changes
+### Public API is the entry point
 
-**Touch only what you must. Clean up only your own mess.**
+GUI, scripts, and tests interact with the instrument exclusively through:
+- `CO3InstrumentAPI` (`co3_api.py`)
+- `pHInstrumentAPI` (`ph_api.py`)
 
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
+Never access `CO3MeasurementCycle` or hardware components from outside those API classes.
 
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
+---
 
-The test: Every changed line should trace directly to the user's request.
+## Module Map
 
-## 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
 ```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+src/phox2/
+  hardware/         # ABCs + mock/ and real/ concrete drivers
+  components/       # Higher-level component wrappers (valve, pump, etc.) built on hardware ABCs
+  measurement/      # Cycle orchestration (co3_cycle.py, ph_cycle.py) + frozen dataclass models
+  physics/          # Pure functions: CO3 and pH calculations (no I/O, no hardware)
+  communication/    # IFerryboxClient ABC + FerryboxUDPClient / NullFerryboxClient
+  storage/          # FileStorage — writes .spt / .evl / .log files
+  gui/              # FastAPI + WebSocket server; calls API classes only
+  factory.py        # InstrumentFactory — only wiring point
+  co3_api.py        # CO3InstrumentAPI — public surface
+  ph_api.py         # pHInstrumentAPI — public surface
+configs/            # co3_config.yaml, ph_config.yaml (Hydra/OmegaConf)
+tests/              # pytest-asyncio integration tests using mock hardware
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+---
 
-## 5. Keep Instructions in Sync
+## Key Conventions
 
-**When you change instrument logic or GUI design, update the matching instruction file.**
+### Configuration
+- Config loaded via **Hydra/OmegaConf** (`DictConfig`). Pass `cfg` to `InstrumentFactory`, never parse it inside components.
+- `hardware.use_mock: true` enables full mock mode (CI, dev). `false` requires real RPi drivers.
+- `measurement.time_acceleration` divides all `asyncio.sleep` durations — set high in tests.
 
-| Change type | Instruction file to update |
-|-------------|---------------------------|
-| Hardware interfaces, measurement physics, config schema, data models, API methods, communication layer | `.github/instructions/instrument-logic.instructions.md` |
-| GUI layout, views, tabs, plots, live data, manual controls, mode state machine | `.github/instructions/gui-design.instructions.md` |
+### Data models
+- Measurement results are **frozen dataclasses** (`@dataclass(frozen=True)`) — never mutate after creation.
+- `CO3MeasurementResult` and `pHMeasurementResult` are the primary DTOs; `SpectralData` carries raw spectra.
 
-Update the instruction **in the same task** as the code change, not as a follow-up. If the code change makes a section of the instruction stale or wrong, rewrite that section. If it adds a new subsystem, add a matching section.
+### Async
+- Measurement cycles and hardware calls are `async`. Never block the event loop with synchronous I/O.
+- API classes are async context managers (`async with API.from_config(cfg) as api:`).
+- `ISpectrometer.get_intensities()` is async; `get_intensities_sync()` exists for GUI polling.
+
+### Interfaces (ISP)
+- Each interface covers exactly one hardware role. Do not add unrelated methods to an existing interface.
+- New hardware capabilities → new interface in the appropriate `interfaces.py`.
+
+---
+
+## Build and Test
+
+```bash
+# Install (dev mode, with dev extras)
+pip install -e ".[dev]"
+
+# Run tests (mock hardware, no RPi required)
+pytest
+
+# Run with time acceleration for fast CI
+# Set measurement.time_acceleration: 100 in config
+```
+
+Tests load configs directly via `OmegaConf.load()` — no Hydra, no output directories created.
+
+---
+
+## Keep Instructions in Sync
+
+When you change instrument logic or GUI design, update the matching instruction file **in the same task**.
+
+| Change type | Instruction file |
+|-------------|-----------------|
+| Hardware interfaces, measurement physics, config schema, data models, API methods, communication | `.github/instructions/instrument-logic.instructions.md` |
+| GUI layout, tabs, plots, live data, manual controls, mode state machine | `.github/instructions/gui-design.instructions.md` |
+
+If a change makes a section stale or wrong, rewrite it. If it adds a new subsystem, add a matching section.

@@ -6,10 +6,10 @@ description: "Use when implementing, extending, or reviewing the GUI for pH or C
 
 ## Guiding Principles
 
-- **Framework-agnostic**: these instructions describe *what* to render and *what happens*, not *how* in any specific toolkit. PyQt5, Tkinter, Dear PyGui, web-based, or any other UI layer are all valid targets.
-- **API-first**: the GUI must interact with the instrument exclusively via the public API (`CO3InstrumentAPI` or a future `pHInstrumentAPI`). It must never access hardware drivers directly.
+- **Current implementation**: FastAPI + WebSocket backend (`gui/app.py`) + Vue 3 SPA frontend (`gui/static/index.html`). The frontend communicates exclusively via the WebSocket at `/ws` and the REST endpoint `GET /api/history`. The design intent below is described in terms of *what* to render, so a future frontend replacement can follow the same spec.
+- **API-first**: the backend must interact with the instrument exclusively via the public API (`CO3InstrumentAPI` or `pHInstrumentAPI`). Hardware drivers are never imported by `app.py`.
 - **Mode-driven**: every interactive widget has an enabled/disabled state determined by the current operating mode. The mode state machine is the single source of truth for what the user is allowed to do.
-- **Async-safe**: measurement cycles and hardware calls are `async`. The UI must not block the event loop; all instrument API calls must be awaited (or submitted to an async executor, depending on the framework).
+- **Async-safe**: measurement cycles and hardware calls are `async`. The backend must not block the event loop; all instrument API calls must be awaited within asyncio tasks.
 
 ---
 
@@ -307,13 +307,81 @@ State encoding:
 
 ---
 
-## Tab: Log
+## Backend Architecture (`gui/app.py`)
 
-A scrolling, read-only text area that shows all `logging` output (INFO and above by default, DEBUG when debug mode is on). New log lines are appended at the bottom.
+The backend is a FastAPI application running under uvicorn. It owns the instrument API instance and all background tasks. All frontend communication is via WebSocket (push-based), with one REST endpoint for initial history load.
+
+### REST Endpoints
+
+| Method | Path | Response | Description |
+|--------|------|----------|-------------|
+| `GET` | `/` | `FileResponse` | Serve Vue 3 SPA (`gui/static/index.html`) |
+| `GET` | `/api/history` | `list[dict]` | Last 50 rows from `CO3.log` or `pH.log`; each dict has `timestamp`, `t_cuvette`, `value` (CO3 or pH_cuvette), and `pH_insitu` (pH only) |
+
+### WebSocket — `/ws`
+
+**On connect:** server immediately broadcasts a `state_snapshot` message followed by a `history` message to the new client.
+
+**On receive:** parse JSON and dispatch the `cmd` field via `InstrumentState.handle_command()`.
+
+#### Outgoing message types (server → client)
+
+| `type` | Key fields | When sent |
+|--------|-----------|----------|
+| `state_snapshot` | `instrument_type`, `modes`, `measurement_n`, `last_result`, `wavelengths`, `n_cycles`, `interval_s` | On every new WebSocket connection |
+| `history` | `points: list[dict]` | On every new WebSocket connection |
+| `sensor_update` | `t_cuvette`, `voltage`, `fb_temp`, `fb_sal` | Every 500 ms by `_sensor_poll` |
+| `spectrum_update` | `intensities: list[float]` | Every ~int_time + 200–1000 ms by `_spectrum_poll`; paused during Measuring/Adjusting |
+| `step_complete` | `step: str` | When `on_step` callback fires during a measurement cycle |
+| `measurement_result` | `instrument: "co3"\|"ph"`, plus all result fields | After a successful measurement cycle |
+| `countdown` | `seconds_remaining: int` | Every 15 s while Continuous mode is active |
+| `mode_change` | `modes: list[str]`, `measurement_n: int` | When the mode set changes |
+| `log_line` | `text: str` | When a Python `logging` record is emitted |
+
+#### Incoming commands (client → server)
+
+| `cmd` | Extra fields | Backend action |
+|-------|-------------|---------------|
+| `start_continuous` | `salinity: float` | Start `_continuous_loop(salinity)` as asyncio task |
+| `stop_continuous` | — | Set `_stop_continuous` event |
+| `start_single` | `salinity: float` | Run `_run_measurement(salinity, flush_before=False)` once |
+| `open_valve` | — | `await api.open_valve()` |
+| `close_valve` | — | `await api.close_valve()` |
+| `turn_on_light` | — | `api.turn_on_light()` (CO3 only) |
+| `turn_off_light` | — | `api.turn_off_light()` (CO3 only) |
+| `open_shutter` | — | `api.open_shutter()` (CO3 only) |
+| `close_shutter` | — | `api.close_shutter()` (CO3 only) |
+| `start_stirrer` | — | `api.start_stirrer()` |
+| `stop_stirrer` | — | `api.stop_stirrer()` |
+| `run_water_pump` | `duration_s: float` | `await api.run_water_pump(duration_s)` |
+| `pulse_dye_pump` | `n_shots: int` | `await api.pulse_dye_pump(n_shots)` |
+| `drain_cuvette` | — | `await api.drain_cuvette()` |
+| `auto_adjust` | — | `await api.auto_adjust_integration_time()` with mode lock |
+
+### Background Tasks
+
+`InstrumentState` runs three perpetual asyncio tasks while the server is alive:
+
+| Task | Period | Description |
+|------|--------|-------------|
+| `_sensor_poll()` | 500 ms | Reads `api.get_temperature()`, `api.get_voltage()`, `api.get_ferrybox_data()`; broadcasts `sensor_update` |
+| `_spectrum_poll()` | `specIntTime + clamp(specIntTime×2, 200, 1000)` ms | Calls `api.get_spectrum()` and broadcasts `spectrum_update`; **paused** (skipped) while `"Measuring"` or `"Adjusting"` in mode set |
+| `_countdown_loop()` | 15 s | Broadcasts `countdown` message with seconds until next measurement; only active while `"Continuous"` in mode set |
+
+### Mode Set
+
+Modes are tracked as a Python `set[str]`. Multiple modes can be active simultaneously (e.g. `{"Continuous", "Measuring"}` during a continuous cycle run).
+
+| Mode string | Meaning |
+|------------|--------|
+| `"Measuring"` | A measurement cycle is actively running |
+| `"Adjusting"` | Auto-adjustment of light/LEDs is running |
+| `"Continuous"` | Automatic periodic sampling is scheduled |
+
+Every mode change broadcasts a `mode_change` message to all clients.
 
 ---
 
-## Mode State Machine
 
 The GUI has a set of **major modes** that can be active simultaneously. The mode determines which widgets are enabled or disabled.
 
