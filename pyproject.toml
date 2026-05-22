@@ -15,6 +15,11 @@ hardware = [
     "seabreeze>=1.4",
     # pigpio and ADCDifferentialPi are typically system-installed on RPi
 ]
+gui = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "websockets>=12",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>phox2 Instrument</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style type="text/tailwindcss">
+    @layer components {
+      .btn-primary {
+        @apply px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800
+               text-white rounded text-sm font-medium transition-colors
+               disabled:opacity-40 disabled:cursor-not-allowed;
+      }
+      .btn-toggle {
+        @apply px-4 py-2 bg-gray-700 hover:bg-gray-600 active:bg-gray-500
+               text-white rounded text-sm font-medium transition-colors
+               border border-gray-600
+               disabled:opacity-40 disabled:cursor-not-allowed;
+      }
+      .btn-active {
+        @apply !bg-blue-700 !border-blue-500;
+      }
+      .btn-warn-active {
+        @apply !bg-amber-700 !border-amber-500;
+      }
+      .btn-action {
+        @apply w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 active:bg-gray-500
+               text-white rounded text-sm font-medium transition-colors
+               border border-gray-600 text-center
+               disabled:opacity-40 disabled:cursor-not-allowed;
+      }
+      .card {
+        @apply bg-gray-800 rounded-lg p-3;
+      }
+      .card-title {
+        @apply text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-screen overflow-hidden">
+
+<div id="app" class="flex flex-col h-screen">
+
+  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <header class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
+    <div class="flex items-center gap-3">
+      <h1 class="text-base font-bold tracking-tight">{{ instrumentTitle }}</h1>
+      <span v-if="measurementN > 0" class="text-xs text-gray-500 font-mono">
+        #{{ measurementN }}
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full transition-colors"
+            :class="connected ? 'bg-green-400' : 'bg-red-500'"></span>
+      <span class="text-xs text-gray-400">{{ connected ? 'Connected' : 'Reconnecting…' }}</span>
+    </div>
+  </header>
+
+  <!-- ── Main: left plots | right tabs ───────────────────────────── -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- Left: plots (40%) -->
+    <div class="w-2/5 flex flex-col gap-2 p-2 border-r border-gray-700 shrink-0">
+      <div class="card flex-1 flex flex-col min-h-0">
+        <div class="card-title">Live Spectrum</div>
+        <div class="relative flex-1">
+          <canvas id="spectrumChart"></canvas>
+        </div>
+      </div>
+      <div class="card flex-1 flex flex-col min-h-0">
+        <div class="card-title">{{ resultChartTitle }}</div>
+        <div class="relative flex-1">
+          <canvas id="resultChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: tabs (60%) -->
+    <div class="flex-1 flex flex-col min-w-0">
+
+      <!-- Tab bar -->
+      <div class="flex border-b border-gray-700 bg-gray-800 shrink-0">
+        <button v-for="tab in tabs" :key="tab.id"
+                @click="activeTab = tab.id"
+                class="px-5 py-2.5 text-sm font-medium transition-colors border-b-2"
+                :class="activeTab === tab.id
+                  ? 'text-white border-blue-400 bg-gray-900'
+                  : 'text-gray-400 border-transparent hover:text-gray-200'">
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <!-- Tab content (v-show keeps all content in DOM) -->
+      <div class="flex-1 overflow-y-auto p-3 space-y-3">
+
+        <!-- ════════ HOME TAB ════════ -->
+        <template v-if="activeTab === 'home'">
+
+          <!-- Status banner -->
+          <div class="px-3 py-2 rounded text-sm font-medium" :class="statusBarClass">
+            {{ statusText }}
+          </div>
+
+          <!-- Controls row -->
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex items-center gap-1.5">
+              <label class="text-xs text-gray-400">Salinity&nbsp;(PSU)</label>
+              <input type="number" v-model.number="salinityInput"
+                     step="0.1" min="0" max="45"
+                     :disabled="isMeasuring"
+                     class="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1.5
+                            text-sm text-center disabled:opacity-40" />
+            </div>
+            <button @click="startSingle" :disabled="!canStartSingle" class="btn-primary">
+              Single Measurement
+            </button>
+            <button @click="toggleContinuous" :disabled="!canToggleContinuous"
+                    class="btn-toggle" :class="{ 'btn-active': isContinuous }">
+              {{ isContinuous ? 'Stop Continuous' : 'Start Continuous' }}
+            </button>
+          </div>
+
+          <!-- Two-column grid: progress+result | sensors -->
+          <div class="grid grid-cols-2 gap-3">
+
+            <!-- Left column -->
+            <div class="space-y-3">
+
+              <!-- Measuring progress -->
+              <div class="card">
+                <div class="card-title">Measuring Progress</div>
+                <div v-for="step in progressSteps" :key="step.key"
+                     class="flex items-center gap-2 py-1">
+                  <span class="w-4 h-4 rounded flex items-center justify-center
+                               text-xs border shrink-0 transition-colors"
+                        :class="stepsCompleted.has(step.key)
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : 'border-gray-600 text-transparent'">✓</span>
+                  <span class="text-sm transition-colors"
+                        :class="stepsCompleted.has(step.key)
+                          ? 'text-green-300' : 'text-gray-500'">
+                    {{ step.label }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Last measurement result -->
+              <div class="card">
+                <div class="card-title">Last Measurement</div>
+                <div v-if="!lastResult" class="text-sm text-gray-500 py-1">
+                  No results yet
+                </div>
+                <table v-else class="w-full text-sm">
+                  <tr v-for="row in lastResultRows" :key="row.label"
+                      class="border-b border-gray-700 last:border-0">
+                    <td class="py-1 pr-3 text-gray-400 whitespace-nowrap">{{ row.label }}</td>
+                    <td class="py-1 font-mono text-white">{{ row.value }}</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+
+            <!-- Right column: live sensors -->
+            <div class="card">
+              <div class="card-title">Live Sensors</div>
+              <div class="space-y-2.5">
+                <div v-for="sensor in sensorRows" :key="sensor.label"
+                     class="flex justify-between items-baseline gap-2">
+                  <span class="text-sm text-gray-400">{{ sensor.label }}</span>
+                  <span class="font-mono text-sm text-white">{{ sensor.value }}</span>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /grid -->
+        </template><!-- /home -->
+
+        <!-- ════════ MANUAL TAB ════════ -->
+        <template v-if="activeTab === 'manual'">
+
+          <!-- Manual mode toggle -->
+          <button @click="toggleManual" :disabled="!canToggleManual"
+                  class="btn-toggle w-full justify-center py-3"
+                  :class="{ 'btn-warn-active': manualActive }">
+            {{ manualActive ? '⚠  Manual Control Active — Click to Disable' : 'Enable Manual Control' }}
+          </button>
+          <p class="text-xs text-gray-500 text-center -mt-1">
+            Manual control is disabled while measuring or adjusting
+          </p>
+
+          <!-- Hardware buttons -->
+          <div class="grid grid-cols-2 gap-2">
+
+            <!-- Valve toggle -->
+            <button @click="toggleValve" :disabled="!manualActive" class="btn-action"
+                    :class="{ 'btn-active': valveOpen }">
+              {{ valveOpen ? 'Close Inlet Valve' : 'Open Inlet Valve' }}
+            </button>
+
+            <!-- Light toggle -->
+            <button @click="toggleLight" :disabled="!manualActive" class="btn-action"
+                    :class="{ 'btn-active': lightOn }">
+              {{ lightOn ? 'Turn Off Light' : 'Turn On Light' }}
+            </button>
+
+            <!-- Shutter (CO3 only) -->
+            <button v-if="isCo3" @click="toggleShutter" :disabled="!manualActive"
+                    class="btn-action" :class="{ 'btn-active': shutterOpen }">
+              {{ shutterOpen ? 'Close Shutter' : 'Open Shutter' }}
+            </button>
+
+            <!-- Stirrer toggle -->
+            <button @click="toggleStirrer" :disabled="!manualActive" class="btn-action"
+                    :class="{ 'btn-active': stirrerOn }">
+              {{ stirrerOn ? 'Stop Stirrer' : 'Start Stirrer' }}
+            </button>
+
+            <!-- Water pump -->
+            <button @click="runWaterPump" :disabled="!manualActive" class="btn-action">
+              Run Water Pump (10 s)
+            </button>
+
+            <!-- Dye pump -->
+            <button @click="pulseDyePump" :disabled="!manualActive" class="btn-action">
+              Dye Pump (3 shots)
+            </button>
+
+            <!-- Drain (CO3 only) -->
+            <button v-if="isCo3" @click="drainCuvette" :disabled="!manualActive"
+                    class="btn-action">
+              Drain Cuvette
+            </button>
+
+            <!-- Auto-adjust -->
+            <button @click="autoAdjust" :disabled="!manualActive || isAdjusting"
+                    class="btn-action">
+              {{ isAdjusting ? 'Adjusting…' : 'Auto-Adjust Light' }}
+            </button>
+
+          </div>
+        </template><!-- /manual -->
+
+        <!-- ════════ LOG TAB ════════ -->
+        <template v-if="activeTab === 'log'">
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-gray-500">{{ logLines.length }} lines</span>
+            <button @click="logLines = []"
+                    class="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+              Clear
+            </button>
+          </div>
+          <textarea ref="logArea" readonly
+                    class="w-full font-mono text-xs bg-gray-800 text-gray-300 rounded
+                           p-2 resize-none border border-gray-700 focus:outline-none"
+                    style="height: calc(100vh - 14rem)"
+                    :value="logLines.join('\n')"></textarea>
+        </template><!-- /log -->
+
+      </div><!-- /tab content -->
+    </div><!-- /right panel -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+
+const CHART_DARK = {
+  gridColor: '#374151',
+  tickColor: '#9ca3af',
+  titleColor: '#9ca3af',
+};
+
+createApp({
+  setup() {
+    // ── Reactive state ────────────────────────────────────────────
+    const connected      = ref(false);
+    const instrumentType = ref('co3');
+    const modes          = ref(new Set());
+    const measurementN   = ref(0);
+    const salinityInput  = ref(35.0);
+    const sensors        = ref({ t_cuvette: null, voltage: null, fb_temp: null, fb_sal: null });
+    const lastResult     = ref(null);
+    const stepsCompleted = ref(new Set());
+    const countdownS     = ref(null);
+    const logLines       = ref([]);
+    const activeTab      = ref('home');
+    const nCycles        = ref(1);
+    const wavelengths    = ref([]);
+    const manualActive   = ref(false);
+
+    // Client-side hardware toggle state (tracks what we told the server)
+    const valveOpen   = ref(false);
+    const lightOn     = ref(false);
+    const shutterOpen = ref(false);
+    const stirrerOn   = ref(false);
+
+    const logArea = ref(null);  // textarea DOM ref
+
+    // Chart.js instances (not reactive — plain JS objects)
+    let spectrumChart = null;
+    let resultChart   = null;
+
+    // ── Computed ──────────────────────────────────────────────────
+    const isCo3              = computed(() => instrumentType.value === 'co3');
+    const isMeasuring        = computed(() => modes.value.has('Measuring'));
+    const isContinuous       = computed(() => modes.value.has('Continuous'));
+    const isAdjusting        = computed(() => modes.value.has('Adjusting'));
+    const canStartSingle     = computed(() => !isMeasuring.value && !isContinuous.value && !isAdjusting.value);
+    const canToggleContinuous = computed(() => !isMeasuring.value && !isAdjusting.value);
+    const canToggleManual    = computed(() => !isMeasuring.value && !isAdjusting.value);
+
+    const instrumentTitle  = computed(() => isCo3.value ? 'CO₃ Instrument' : 'pH Instrument');
+    const resultChartTitle = computed(() =>
+      isCo3.value ? 'CO₃ History (µmol/kg)' : 'pH History (insitu)'
+    );
+
+    const tabs = [
+      { id: 'home',   label: 'Home'   },
+      { id: 'manual', label: 'Manual' },
+      { id: 'log',    label: 'Log'    },
+    ];
+
+    const progressSteps = computed(() => {
+      const steps = [
+        { key: 'adjusting_light', label: 'Adjusting Light' },
+        { key: 'dark_blank',      label: 'Dark & Blank'    },
+      ];
+      for (let i = 1; i <= nCycles.value; i++) {
+        steps.push({ key: `measurement_${i}`, label: `Measurement ${i}` });
+      }
+      return steps;
+    });
+
+    const statusText = computed(() => {
+      if (isMeasuring.value)  return `Measuring… (run #${measurementN.value})`;
+      if (isAdjusting.value)  return 'Adjusting light…';
+      if (isContinuous.value && countdownS.value !== null) {
+        const m = Math.floor(countdownS.value / 60);
+        const s = countdownS.value % 60;
+        return `Next sample in ${m} min ${String(s).padStart(2, '0')} s`;
+      }
+      if (isContinuous.value) return 'Continuous mode active';
+      return 'Idle';
+    });
+
+    const statusBarClass = computed(() => {
+      if (isMeasuring.value)  return 'bg-blue-900/60 text-blue-200 border border-blue-700';
+      if (isAdjusting.value)  return 'bg-amber-900/60 text-amber-200 border border-amber-700';
+      if (isContinuous.value) return 'bg-green-900/60 text-green-200 border border-green-700';
+      return 'bg-gray-800 text-gray-400 border border-gray-700';
+    });
+
+    const lastResultRows = computed(() => {
+      const r = lastResult.value;
+      if (!r) return [];
+      const fmt = (v, dec = 3) => (v != null ? v.toFixed(dec) : '—');
+      if (isCo3.value) {
+        return [
+          { label: 'CO₃',        value: fmt(r.co3_umol_per_kg, 1) + ' µmol/kg' },
+          { label: 'T cuvette',  value: fmt(r.t_cuvette, 2)        + ' °C'     },
+          { label: 'S corrected',value: fmt(r.salinity_corrected, 3) + ' PSU'  },
+          { label: 'R ratio',    value: fmt(r.r_ratio, 4)                       },
+          { label: 'T insitu',   value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
+          { label: 'S insitu',   value: r.fb_sal  != null ? fmt(r.fb_sal, 3)  + ' PSU' : '—' },
+        ];
+      }
+      return [
+        { label: 'pH cuvette',  value: fmt(r.pH_cuvette, 4)          },
+        { label: 'pH insitu',   value: fmt(r.pH_insitu, 4)            },
+        { label: 'r²',          value: fmt(r.r_square, 4)             },
+        { label: 'T cuvette',   value: fmt(r.t_cuvette, 2) + ' °C'   },
+        { label: 'T insitu',    value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
+        { label: 'S insitu',    value: r.fb_sal  != null ? fmt(r.fb_sal, 3)  + ' PSU' : '—' },
+      ];
+    });
+
+    const sensorRows = computed(() => {
+      const s = sensors.value;
+      const fmt = (v, dec, unit) => v != null ? v.toFixed(dec) + ' ' + unit : '—';
+      return [
+        { label: 'T cuvette',          value: fmt(s.t_cuvette, 2, '°C')  },
+        { label: 'Voltage',            value: fmt(s.voltage,   4, 'V')   },
+        { label: 'T insitu (Ferrybox)',value: fmt(s.fb_temp,   2, '°C')  },
+        { label: 'S insitu (Ferrybox)',value: fmt(s.fb_sal,    3, 'PSU') },
+      ];
+    });
+
+    // ── WebSocket ────────────────────────────────────────────────
+    let ws = null;
+
+    const send = (msg) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      }
+    };
+
+    // ── Message handler ───────────────────────────────────────────
+    const handleMessage = (msg) => {
+      switch (msg.type) {
+
+        case 'state_snapshot':
+          instrumentType.value = msg.instrument_type || 'co3';
+          modes.value          = new Set(msg.modes || []);
+          measurementN.value   = msg.measurement_n  || 0;
+          lastResult.value     = msg.last_result     || null;
+          nCycles.value        = msg.n_cycles        || 1;
+          wavelengths.value    = msg.wavelengths     || [];
+          if (wavelengths.value.length && spectrumChart) {
+            spectrumChart.data.labels = wavelengths.value.map(w => Math.round(w));
+            spectrumChart.update('none');
+          }
+          break;
+
+        case 'sensor_update':
+          sensors.value = {
+            t_cuvette: msg.t_cuvette,
+            voltage:   msg.voltage,
+            fb_temp:   msg.fb_temp,
+            fb_sal:    msg.fb_sal,
+          };
+          break;
+
+        case 'spectrum_update':
+          if (spectrumChart && msg.intensities) {
+            spectrumChart.data.datasets[0].data = msg.intensities;
+            spectrumChart.update('none');
+          }
+          break;
+
+        case 'mode_change':
+          modes.value      = new Set(msg.modes || []);
+          measurementN.value = msg.measurement_n || 0;
+          if (!modes.value.has('Measuring'))   stepsCompleted.value = new Set();
+          if (!modes.value.has('Continuous'))  countdownS.value = null;
+          break;
+
+        case 'step_complete':
+          stepsCompleted.value = new Set([...stepsCompleted.value, msg.step]);
+          break;
+
+        case 'measurement_result':
+          lastResult.value = msg;
+          if (resultChart) {
+            const label = (msg.timestamp || '').substring(0, 16);
+            const value = msg.instrument === 'co3' ? msg.co3_umol_per_kg : msg.pH_insitu;
+            resultChart.data.labels.push(label);
+            resultChart.data.datasets[0].data.push(value);
+            if (resultChart.data.labels.length > 50) {
+              resultChart.data.labels.shift();
+              resultChart.data.datasets[0].data.shift();
+            }
+            resultChart.update();
+          }
+          break;
+
+        case 'countdown':
+          countdownS.value = msg.seconds_remaining;
+          break;
+
+        case 'log_line':
+          logLines.value.push(msg.text);
+          if (logLines.value.length > 200) logLines.value.shift();
+          nextTick(() => {
+            if (logArea.value) logArea.value.scrollTop = logArea.value.scrollHeight;
+          });
+          break;
+
+        case 'history':
+          if (resultChart && msg.points && msg.points.length) {
+            resultChart.data.labels          = msg.points.map(p => p.timestamp || '');
+            resultChart.data.datasets[0].data = msg.points.map(p => p.value ?? null);
+            resultChart.update();
+          }
+          break;
+      }
+    };
+
+    // ── Commands ──────────────────────────────────────────────────
+    const startSingle       = () => send({ cmd: 'start_single', salinity: salinityInput.value });
+    const toggleContinuous  = () => send({ cmd: isContinuous.value ? 'stop_continuous' : 'start_continuous', salinity: salinityInput.value });
+    const toggleManual      = () => { if (canToggleManual.value) manualActive.value = !manualActive.value; };
+
+    const toggleValve  = () => { valveOpen.value   = !valveOpen.value;   send({ cmd: valveOpen.value   ? 'open_valve'    : 'close_valve'   }); };
+    const toggleLight  = () => { lightOn.value     = !lightOn.value;     send({ cmd: lightOn.value     ? 'turn_on_light' : 'turn_off_light'}); };
+    const toggleShutter= () => { shutterOpen.value = !shutterOpen.value; send({ cmd: shutterOpen.value ? 'open_shutter'  : 'close_shutter' }); };
+    const toggleStirrer= () => { stirrerOn.value   = !stirrerOn.value;   send({ cmd: stirrerOn.value   ? 'start_stirrer' : 'stop_stirrer'  }); };
+
+    const runWaterPump  = () => send({ cmd: 'run_water_pump', duration_s: 10.0 });
+    const pulseDyePump  = () => send({ cmd: 'pulse_dye_pump', n_shots: 3 });
+    const drainCuvette  = () => send({ cmd: 'drain_cuvette' });
+    const autoAdjust    = () => send({ cmd: 'auto_adjust' });
+
+    // ── Chart initialisation ──────────────────────────────────────
+    const initCharts = () => {
+      // Shared chart defaults
+      Chart.defaults.color = CHART_DARK.tickColor;
+
+      // Plot 1: live spectrum
+      spectrumChart = new Chart(
+        document.getElementById('spectrumChart').getContext('2d'),
+        {
+          type: 'line',
+          data: { labels: [], datasets: [{ label: 'Intensity', data: [], borderColor: '#3b82f6', borderWidth: 1, pointRadius: 0, fill: false }] },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                ticks: { maxTicksLimit: 8, color: CHART_DARK.tickColor },
+                grid:  { color: CHART_DARK.gridColor },
+                title: { display: true, text: 'Wavelength (nm)', color: CHART_DARK.titleColor },
+              },
+              y: {
+                min: 0,
+                ticks: { color: CHART_DARK.tickColor },
+                grid:  { color: CHART_DARK.gridColor },
+                title: { display: true, text: 'Intensity (counts)', color: CHART_DARK.titleColor },
+              },
+            },
+          },
+        }
+      );
+
+      // Plot 2: measurement history
+      resultChart = new Chart(
+        document.getElementById('resultChart').getContext('2d'),
+        {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Value',
+              data: [],
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16,185,129,0.12)',
+              borderWidth: 2,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              fill: true,
+              tension: 0.15,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                ticks: { maxTicksLimit: 6, color: CHART_DARK.tickColor, maxRotation: 30 },
+                grid:  { color: CHART_DARK.gridColor },
+              },
+              y: {
+                ticks: { color: CHART_DARK.tickColor },
+                grid:  { color: CHART_DARK.gridColor },
+              },
+            },
+          },
+        }
+      );
+    };
+
+    // ── WebSocket connect with auto-reconnect ─────────────────────
+    const connectWS = () => {
+      const url = `ws://${window.location.host}/ws`;
+      ws = new WebSocket(url);
+      ws.onopen    = ()  => { connected.value = true; };
+      ws.onclose   = ()  => { connected.value = false; setTimeout(connectWS, 3000); };
+      ws.onerror   = ()  => { connected.value = false; };
+      ws.onmessage = (e) => {
+        try { handleMessage(JSON.parse(e.data)); }
+        catch (err) { console.error('WS parse error:', err); }
+      };
+    };
+
+    onMounted(() => {
+      initCharts();
+      connectWS();
+    });
+
+    onUnmounted(() => {
+      if (ws) ws.close();
+    });
+
+    return {
+      // State
+      connected, instrumentType, modes, measurementN, salinityInput,
+      sensors, lastResult, stepsCompleted, countdownS, logLines,
+      activeTab, nCycles, wavelengths, manualActive,
+      valveOpen, lightOn, shutterOpen, stirrerOn,
+      logArea,
+      // Computed
+      isCo3, isMeasuring, isContinuous, isAdjusting,
+      canStartSingle, canToggleContinuous, canToggleManual,
+      instrumentTitle, resultChartTitle, tabs, progressSteps,
+      statusText, statusBarClass, lastResultRows, sensorRows,
+      // Commands
+      startSingle, toggleContinuous, toggleManual,
+      toggleValve, toggleLight, toggleShutter, toggleStirrer,
+      runWaterPump, pulseDyePump, drainCuvette, autoAdjust,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>
