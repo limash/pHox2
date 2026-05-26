@@ -80,8 +80,8 @@ tests/              # pytest-asyncio integration tests using mock hardware
 ## Build and Test
 
 ```bash
-# Install (dev mode, with dev extras)
-pip install -e ".[dev]"
+# First-time setup (or after dependency changes)
+uv sync --extra dev
 
 # Run tests (mock hardware, no RPi required)
 pytest
