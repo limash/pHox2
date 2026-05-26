@@ -145,12 +145,8 @@ The real hardware drivers require system packages:
 # For I²C (ADC communication)
 sudo apt install -y i2c-tools python3-smbus
 
-# For GPIO and PWM control via pigpio daemon
-sudo apt install -y pigpio python3-pigpio
-
-# Start pigpio daemon on boot
-sudo systemctl enable pigpiod
-sudo systemctl start pigpiod
+# For GPIO and PWM control via lgpio (no daemon needed)
+sudo apt install python3-lgpio
 
 # For USB spectrometer (Ocean Insight / SeaBreeze)
 sudo apt install -y libusb-1.0-0 libusb-1.0-0-dev
@@ -226,8 +222,8 @@ measurement:
 Before running measurements, verify hardware is accessible:
 
 ```bash
-# Check GPIO is accessible via pigpio
-python3 -c "import pigpio; pi = pigpio.pi(); print('GPIO OK' if pi.connected else 'FAILED')"
+# Check GPIO is accessible via lgpio
+python3 -c "import lgpio; h = lgpio.gpiochip_open(0); print('GPIO OK'); lgpio.gpiochip_close(h)"
 
 # Check I²C devices are visible
 i2cdetect -y 1
@@ -392,10 +388,10 @@ i2cdetect -y 1
 lsusb | grep -i "ocean"
 ```
 
-**Permission denied on pigpio**: Ensure pigpiod daemon is running:
+**Permission denied on GPIO**: Ensure your user is in the `gpio` group:
 ```bash
-sudo systemctl status pigpiod
-sudo systemctl restart pigpiod
+sudo usermod -a -G gpio $USER
+# Log out and back in for the change to take effect
 ```
 
 ---

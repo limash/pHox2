@@ -1,52 +1,44 @@
 """
-Real GPIO handler using the pigpio library.
+Real GPIO handler using the lgpio library.
 
-pigpio must be installed and the daemon (pigpiod) must be running:
-    sudo pigpiod
+lgpio uses the Linux GPIO character device (/dev/gpiochip0) and works on
+kernel 6.x without a daemon. Install with:
+    sudo apt install python3-lgpio
+    # or: pip install lgpio
 """
 from __future__ import annotations
 
 import logging
 
+import lgpio  # type: ignore[import-untyped]
+
 from phox2.hardware.interfaces import IDigitalOutput
 
 logger = logging.getLogger(__name__)
 
+_GPIOCHIP = 0  # /dev/gpiochip0 — standard on Raspberry Pi
 
-class PigpioDigitalOutput(IDigitalOutput):
-    """GPIO driver backed by the ``pigpio`` C library."""
+
+class LgpioDigitalOutput(IDigitalOutput):
+    """GPIO driver backed by the ``lgpio`` library (kernel 6.x compatible)."""
 
     def __init__(self) -> None:
-        try:
-            import pigpio  # type: ignore[import-untyped]
-        except ImportError as exc:
-            raise ImportError(
-                "pigpio is required for real hardware mode. "
-                "Install it on the Raspberry Pi and start pigpiod."
-            ) from exc
-
-        self._rpi = pigpio.pi()
-        if not self._rpi.connected:
-            raise RuntimeError(
-                "Cannot connect to the pigpio daemon. Run: sudo pigpiod"
-            )
-        self._pigpio = pigpio
-        logger.info("pigpio GPIO driver initialised")
+        self._h = lgpio.gpiochip_open(_GPIOCHIP)
+        logger.info("lgpio GPIO driver initialised (gpiochip%d)", _GPIOCHIP)
 
     def set_high(self, pin: int) -> None:
-        self._rpi.write(pin, True)
+        lgpio.gpio_write(self._h, pin, 1)
         logger.debug("GPIO pin %d → HIGH", pin)
 
     def set_low(self, pin: int) -> None:
-        self._rpi.write(pin, False)
+        lgpio.gpio_write(self._h, pin, 0)
         logger.debug("GPIO pin %d → LOW", pin)
 
     def configure_output(self, pin: int) -> None:
-        """Set *pin* as a GPIO output (call once during initialisation)."""
-        self._rpi.set_mode(pin, self._pigpio.OUTPUT)
+        """Claim *pin* as a GPIO output (call once during initialisation)."""
+        lgpio.gpio_claim_output(self._h, pin)
 
     def close(self) -> None:
-        """Release the pigpio connection."""
-        if self._rpi.connected:
-            self._rpi.stop()
-        logger.info("pigpio GPIO driver closed")
+        """Release the lgpio chip handle."""
+        lgpio.gpiochip_close(self._h)
+        logger.info("lgpio GPIO driver closed")

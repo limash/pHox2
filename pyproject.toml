@@ -13,7 +13,8 @@ dependencies = [
 # Real hardware drivers — install only on Raspberry Pi
 hardware = [
     "seabreeze>=1.4",
-    # pigpio and ADCDifferentialPi are typically system-installed on RPi
+    "lgpio>=0.2",
+    # ADCDifferentialPi is typically system-installed on RPi
 ]
 gui = [
     "fastapi>=0.111",

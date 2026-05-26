@@ -1,42 +1,53 @@
 """
-Real PWM output driver using pigpio.
+Real PWM output driver using lgpio.
 
-Requires pigpiod daemon to be running:
-    sudo pigpiod
+lgpio uses the Linux GPIO character device (/dev/gpiochip0); no daemon needed.
+Install with:
+    sudo apt install python3-lgpio
+    # or: pip install lgpio
 
-Duty cycle is expressed as 0–100 (percentage); pigpio expects 0–255, so the
-conversion is: pigpio_duty = round(duty / 100 * 255).
+Duty cycle is expressed as 0–100 (percentage), which maps directly to lgpio's
+tx_pwm duty-cycle parameter (0.0–100.0).
 """
 from __future__ import annotations
 
 import logging
 
+import lgpio  # type: ignore[import-untyped]
+
 from phox2.hardware.interfaces import IPWMOutput
 
 logger = logging.getLogger(__name__)
 
+_GPIOCHIP = 0   # /dev/gpiochip0 — standard on Raspberry Pi
+_PWM_FREQ = 1000  # Hz — suitable for LED brightness control
 
-class PigpioPWMOutput(IPWMOutput):
-    """GPIO PWM output via pigpio (Raspberry Pi only)."""
+
+class LgpioPWMOutput(IPWMOutput):
+    """GPIO PWM output via lgpio (Raspberry Pi, kernel 6.x compatible)."""
 
     def __init__(self) -> None:
-        import pigpio  # type: ignore[import]
+        self._h = lgpio.gpiochip_open(_GPIOCHIP)
+        logger.info("lgpio PWM driver initialised (gpiochip%d)", _GPIOCHIP)
 
-        self._pi = pigpio.pi()
-        if not self._pi.connected:
-            raise RuntimeError(
-                "pigpio daemon not running. Start it with: sudo pigpiod"
-            )
+    def configure_output(self, pin: int) -> None:
+        """Claim *pin* as a GPIO output (call once during initialisation)."""
+        lgpio.gpio_claim_output(self._h, pin)
 
     def set_pwm(self, pin: int, duty: int) -> None:
-        pigpio_duty = round(max(0, min(100, duty)) / 100 * 255)
-        self._pi.set_PWM_dutycycle(pin, pigpio_duty)
-        logger.debug("PigpioPWMOutput: pin %d → duty %d%% (%d/255)", pin, duty, pigpio_duty)
+        duty_clamped = float(max(0, min(100, duty)))
+        lgpio.tx_pwm(self._h, pin, _PWM_FREQ, duty_clamped)
+        logger.debug("LgpioPWMOutput: pin %d → duty %d%%", pin, duty)
 
     def set_high(self, pin: int) -> None:
-        self._pi.write(pin, 1)
-        logger.debug("PigpioPWMOutput: pin %d → HIGH", pin)
+        lgpio.tx_pwm(self._h, pin, _PWM_FREQ, 100.0)
+        logger.debug("LgpioPWMOutput: pin %d → HIGH", pin)
 
     def set_low(self, pin: int) -> None:
-        self._pi.write(pin, 0)
-        logger.debug("PigpioPWMOutput: pin %d → LOW", pin)
+        lgpio.tx_pwm(self._h, pin, _PWM_FREQ, 0.0)
+        logger.debug("LgpioPWMOutput: pin %d → LOW", pin)
+
+    def close(self) -> None:
+        """Release the lgpio chip handle."""
+        lgpio.gpiochip_close(self._h)
+        logger.info("lgpio PWM driver closed")

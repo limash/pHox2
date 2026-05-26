@@ -71,11 +71,11 @@ class InstrumentFactory:
         else:
             logger.info("Hardware mode: REAL")
             from phox2.hardware.real.adc import ADCDifferentialPiReader
-            from phox2.hardware.real.gpio import PigpioDigitalOutput
+            from phox2.hardware.real.gpio import LgpioDigitalOutput
             from phox2.hardware.real.spectrometer import SeabreezeSpectrometer
 
             return (
-                PigpioDigitalOutput(),
+                LgpioDigitalOutput(),
                 ADCDifferentialPiReader(cfg.adc),
                 SeabreezeSpectrometer(cfg.spectrometer),
             )
@@ -98,11 +98,11 @@ class InstrumentFactory:
         else:
             logger.info("pH hardware mode: REAL")
             from phox2.hardware.real.adc import ADCDifferentialPiReader
-            from phox2.hardware.real.pwm import PigpioPWMOutput
+            from phox2.hardware.real.pwm import LgpioPWMOutput
             from phox2.hardware.real.spectrometer import SeabreezeSpectrometer
 
             return (
-                PigpioPWMOutput(),
+                LgpioPWMOutput(),
                 ADCDifferentialPiReader(cfg.adc),
                 SeabreezeSpectrometer(cfg.spectrometer),
             )
