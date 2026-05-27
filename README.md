@@ -115,7 +115,7 @@ Instructions for installing and running on real hardware with a Raspberry Pi.
 
 **Hardware:**
 - Raspberry Pi 4 or later (4 GB+ RAM recommended)
-- Freshly imaged Raspberry Pi OS (Bookworm or later)
+- Freshly imaged **Raspberry Pi OS Trixie** (64-bit, Kernel 6.12, Debian 13, released 21 Apr 2026)
 - Instrument hardware connected to GPIO pins and I²C bus
 
 **Software:**
