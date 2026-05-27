@@ -120,7 +120,6 @@ Instructions for installing and running on real hardware with a Raspberry Pi.
 
 **Software:**
 - Python 3.11 or later
-- `uv` or `pip` for package management
 
 ### Installation on Raspberry Pi
 
@@ -131,37 +130,50 @@ sudo apt update
 sudo apt upgrade -y
 ```
 
-#### 2. Install Python and Build Tools
+#### 2. Install System Packages
+
+Install everything possible via apt — prebuilt system packages are faster and avoid
+compiling C extensions from source:
 
 ```bash
-sudo apt install -y python3.11 python3.11-venv python3.11-dev build-essential
+sudo apt install -y \
+  build-essential python3-dev python3-venv \
+  python3-lgpio \
+  python3-smbus i2c-tools \
+  libusb-1.0-0 libusb-1.0-0-dev libusb-dev pkg-config
 ```
 
-#### 3. Install Hardware Libraries (System-Level)
+| Package | Purpose |
+|---------|---------|
+| `build-essential python3-dev` | C compiler for building seabreeze |
+| `python3-lgpio` | GPIO/PWM driver — prebuilt, avoids compiling lgpio from source |
+| `python3-smbus` | I²C driver for the ADC board |
+| `i2c-tools` | `i2cdetect` diagnostic utility |
+| `libusb-1.0-0-dev` | Modern libusb headers (seabreeze C library) |
+| `libusb-dev` | Legacy libusb 0.x headers (`usb.h`, also required by seabreeze) |
+| `pkg-config` | Used by seabreeze's build system to locate libusb |
 
-The real hardware drivers require system packages:
+seabreeze's build system looks for a pkg-config package named `libusb`, but Debian names
+it `libusb-1.0`. Create an alias:
 
 ```bash
-# For I²C (ADC communication)
-sudo apt install -y i2c-tools python3-smbus
+PKGDIR=$(pkg-config --variable=pcfiledir libusb-1.0)
+sudo ln -sf "$PKGDIR/libusb-1.0.pc" "$PKGDIR/libusb.pc"
+```
 
-# For GPIO and PWM control via lgpio (no daemon needed)
-sudo apt install python3-lgpio
+Allow the current user to access GPIO without sudo:
 
-# For USB spectrometer (Ocean Insight / SeaBreeze)
-sudo apt install -y libusb-1.0-0 libusb-1.0-0-dev
-
-# Allow the current user to access GPIO without sudo
+```bash
 sudo usermod -a -G gpio $USER
 # Log out and back in for group changes to take effect
 ```
 
-#### 4. Configure I²C
+#### 3. Configure I²C
 
 Enable I²C interface:
 
 ```bash
-sudo raspi-config nonint set_i2c 0  # Enable I²C
+sudo raspi-config nonint do_i2c 0  # Enable I²C
 ```
 
 Verify I²C devices are visible:
@@ -170,20 +182,25 @@ Verify I²C devices are visible:
 i2cdetect -y 1
 ```
 
-#### 5. Clone and Install the Package
+#### 4. Clone and Install the Package
+
+Create the venv with `--system-site-packages` so that the system-installed `python3-lgpio`
+and `python3-smbus` are visible inside it — pip then only needs to build `seabreeze` and
+install the pure-Python packages:
 
 ```bash
 # Clone or navigate to the repository
 cd /path/to/phox2
 
-# Install with real hardware and GUI dependencies
-uv sync --extra hardware --extra gui
+# Create and activate a virtual environment
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
 
-# Or with pip:
+# Install with real hardware and GUI dependencies
 pip install -e ".[hardware,gui]"
 ```
 
-#### 6. Update Configuration
+#### 5. Update Configuration
 
 Edit `configs/co3_config.yaml` or `configs/ph_config.yaml` to match your hardware:
 
@@ -217,7 +234,7 @@ measurement:
   time_acceleration: 1     # set to 1 for real hardware (not accelerated)
 ```
 
-#### 7. Test Hardware Communication
+#### 6. Test Hardware Communication
 
 Before running measurements, verify hardware is accessible:
 
@@ -235,14 +252,17 @@ lsusb | grep -i "ocean"
 ### Run a Measurement on Raspberry Pi
 
 ```bash
+# Activate the virtual environment first (if not already active)
+source .venv/bin/activate
+
 # Single CO3 measurement with real hardware:
-uv run scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false
+python scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false
 
 # Single pH measurement:
-uv run scripts/run_single_measurement.py --config-name ph_config hardware.use_mock=false
+python scripts/run_single_measurement.py --config-name ph_config hardware.use_mock=false
 
 # With manual salinity override:
-uv run scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false measurement.salinity=34.5
+python scripts/run_single_measurement.py --config-name co3_config hardware.use_mock=false measurement.salinity=34.5
 ```
 
 ### Run the GUI on Raspberry Pi
@@ -250,11 +270,14 @@ uv run scripts/run_single_measurement.py --config-name co3_config hardware.use_m
 Launch the web interface with real hardware:
 
 ```bash
+# Activate the virtual environment first (if not already active)
+source .venv/bin/activate
+
 # CO3 instrument:
-uv run scripts/run_gui.py --config-name co3_config hardware.use_mock=false
+python scripts/run_gui.py --config-name co3_config hardware.use_mock=false
 
 # pH instrument:
-uv run scripts/run_gui.py --config-name ph_config hardware.use_mock=false
+python scripts/run_gui.py --config-name ph_config hardware.use_mock=false
 ```
 
 The server listens on port 8000. Access it:
@@ -271,7 +294,8 @@ To keep the GUI running after you disconnect from SSH, use `tmux` or `screen`:
 
 ```bash
 tmux new -s phox2
-uv run scripts/run_gui.py --config-name co3_config hardware.use_mock=false
+source .venv/bin/activate
+python scripts/run_gui.py --config-name co3_config hardware.use_mock=false
 # Detach with Ctrl+B, D
 ```
 
@@ -284,14 +308,14 @@ To run measurements on a schedule, use a cron job:
 crontab -e
 
 # Example: CO3 every hour, log to file
-0 * * * * cd /path/to/phox2 && uv run scripts/run_single_measurement.py \
+0 * * * * cd /path/to/phox2 && .venv/bin/python scripts/run_single_measurement.py \
   --config-name co3_config hardware.use_mock=false >> ~/phox2.log 2>&1
 ```
 
 Or use `run_continuous_measurement.py` directly (handles the loop and Ctrl-C gracefully):
 
 ```bash
-uv run scripts/run_continuous_measurement.py --config-name co3_config \
+python scripts/run_continuous_measurement.py --config-name co3_config \
   hardware.use_mock=false continuous.interval_s=300
 ```
 
