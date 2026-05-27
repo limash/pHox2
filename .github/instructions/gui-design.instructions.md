@@ -329,11 +329,11 @@ The backend is a FastAPI application running under uvicorn. It owns the instrume
 | `type` | Key fields | When sent |
 |--------|-----------|----------|
 | `state_snapshot` | `instrument_type`, `modes`, `measurement_n`, `last_result`, `wavelengths`, `n_cycles`, `interval_s` | On every new WebSocket connection |
-| `history` | `points: list[dict]` | On every new WebSocket connection |
+| `history` | `points: list[dict]` | On every new WebSocket connection — **used by pH result chart only**; CO3 Plot 2 ignores this message |
 | `sensor_update` | `t_cuvette`, `voltage`, `fb_temp`, `fb_sal` | Every 500 ms by `_sensor_poll` |
 | `spectrum_update` | `intensities: list[float]` | Every ~int_time + 200–1000 ms by `_spectrum_poll`; paused during Measuring/Adjusting |
 | `step_complete` | `step: str` | When `on_step` callback fires during a measurement cycle |
-| `measurement_result` | `instrument: "co3"\|"ph"`, plus all result fields | After a successful measurement cycle |
+| `measurement_result` | `instrument: "co3"\|"ph"`, plus all result fields; **CO3 also includes `absorption_wavelengths: list[float]` (wavelengths 220–360 nm) and `absorption_spectra: dict[str, list[float]]` (absorbance per injection, keyed by 0-based string index)** | After a successful measurement cycle |
 | `countdown` | `seconds_remaining: int` | Every 15 s while Continuous mode is active |
 | `mode_change` | `modes: list[str]`, `measurement_n: int` | When the mode set changes |
 | `log_line` | `text: str` | When a Python `logging` record is emitted |

@@ -315,7 +315,7 @@ createApp({
 
     const instrumentTitle  = computed(() => isCo3.value ? 'CO₃ Instrument' : 'pH Instrument');
     const resultChartTitle = computed(() =>
-      isCo3.value ? 'CO₃ History (µmol/kg)' : 'pH History (insitu)'
+      isCo3.value ? 'Last CO₃ Measurement' : 'pH History (insitu)'
     );
 
     const tabs = [
@@ -413,6 +413,13 @@ createApp({
             spectrumChart.data.labels = wavelengths.value.map(w => Math.round(w));
             spectrumChart.update('none');
           }
+          if (resultChart && (msg.instrument_type || 'co3') === 'co3') {
+            resultChart.data.datasets = [];
+            resultChart.data.labels   = [];
+            resultChart.options.scales.x.title = { display: true, text: 'Wavelength (nm)', color: CHART_DARK.titleColor };
+            resultChart.options.scales.y.title = { display: true, text: 'Absorbance (A.U.)', color: CHART_DARK.titleColor };
+            resultChart.update('none');
+          }
           break;
 
         case 'sensor_update':
@@ -440,20 +447,39 @@ createApp({
 
         case 'step_complete':
           stepsCompleted.value = new Set([...stepsCompleted.value, msg.step]);
+          if (msg.step === 'adjusting_light' && isCo3.value && resultChart) {
+            resultChart.data.datasets = [];
+            resultChart.data.labels   = [];
+            resultChart.update('none');
+          }
           break;
 
         case 'measurement_result':
           lastResult.value = msg;
           if (resultChart) {
-            const label = (msg.timestamp || '').substring(0, 16);
-            const value = msg.instrument === 'co3' ? msg.co3_umol_per_kg : msg.pH_insitu;
-            resultChart.data.labels.push(label);
-            resultChart.data.datasets[0].data.push(value);
-            if (resultChart.data.labels.length > 50) {
-              resultChart.data.labels.shift();
-              resultChart.data.datasets[0].data.shift();
+            if (msg.instrument === 'co3' && msg.absorption_spectra) {
+              const CO3_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#d946ef', '#eab308'];
+              resultChart.data.labels   = (msg.absorption_wavelengths || []).map(w => Math.round(w));
+              resultChart.data.datasets = Object.entries(msg.absorption_spectra).map(([idx, values], i) => ({
+                label: `Injection ${parseInt(idx) + 1}`,
+                data: values,
+                borderColor: CO3_COLORS[i % CO3_COLORS.length],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+              }));
+              resultChart.update();
+            } else if (msg.instrument !== 'co3') {
+              const label = (msg.timestamp || '').substring(0, 16);
+              const value = msg.pH_insitu;
+              resultChart.data.labels.push(label);
+              resultChart.data.datasets[0].data.push(value);
+              if (resultChart.data.labels.length > 50) {
+                resultChart.data.labels.shift();
+                resultChart.data.datasets[0].data.shift();
+              }
+              resultChart.update();
             }
-            resultChart.update();
           }
           break;
 
@@ -470,7 +496,7 @@ createApp({
           break;
 
         case 'history':
-          if (resultChart && msg.points && msg.points.length) {
+          if (!isCo3.value && resultChart && msg.points && msg.points.length) {
             resultChart.data.labels          = msg.points.map(p => p.timestamp || '');
             resultChart.data.datasets[0].data = msg.points.map(p => p.value ?? null);
             resultChart.update();

@@ -432,6 +432,17 @@ def _serialize_result(
 ) -> dict:
     if instrument_type == "co3":
         assert isinstance(result, CO3MeasurementResult)
+        spectra = result.spectra
+        wl = spectra.wavelengths
+        mask = (wl >= 220.0) & (wl <= 360.0)
+        dark = spectra.dark[mask]
+        blank = spectra.blank[mask]
+        denom = np.clip(blank - dark, 1e-9, None)
+        absorption_spectra: dict[str, list] = {}
+        for idx, inj_arr in spectra.injections.items():
+            signal = np.clip(inj_arr[mask] - dark, 1e-9, None)
+            absorption = (-np.log10(signal / denom)).tolist()
+            absorption_spectra[str(idx)] = absorption
         return {
             "instrument": "co3",
             "timestamp": result.timestamp.isoformat(timespec="seconds"),
@@ -444,6 +455,8 @@ def _serialize_result(
             "a3": result.a3,
             "fb_temp": result.fb_temp,
             "fb_sal": result.fb_sal,
+            "absorption_wavelengths": wl[mask].tolist(),
+            "absorption_spectra": absorption_spectra,
         }
     assert isinstance(result, pHMeasurementResult)
     return {
