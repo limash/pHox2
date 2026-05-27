@@ -299,24 +299,84 @@ python scripts/run_gui.py --config-name co3_config hardware.use_mock=false
 # Detach with Ctrl+B, D
 ```
 
-### Automated Continuous Measurements
+### Autostart on Boot (systemd)
 
-To run measurements on a schedule, use a cron job:
+The recommended approach for unattended deployment is a systemd service that launches the GUI with continuous measurements enabled automatically. The service restarts on failure and routes all output to the system journal.
+
+#### 1. Ensure required group memberships
 
 ```bash
-# Edit crontab
-crontab -e
-
-# Example: CO3 every hour, log to file
-0 * * * * cd /path/to/phox2 && .venv/bin/python scripts/run_single_measurement.py \
-  --config-name co3_config hardware.use_mock=false >> ~/phox2.log 2>&1
+sudo usermod -a -G gpio,i2c pi
+# Log out and back in for the changes to take effect.
+groups pi  # Should include both gpio and i2c
 ```
 
-Or use `run_continuous_measurement.py` directly (handles the loop and Ctrl-C gracefully):
+#### 2. Install and enable the service
 
 ```bash
-python scripts/run_continuous_measurement.py --config-name co3_config \
-  hardware.use_mock=false continuous.interval_s=300
+# Copy the service file (adjust path if the repo is not at /home/pi/pHox2)
+sudo cp /home/pi/pHox2/deploy/phox2-co3-gui.service /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable phox2-co3-gui   # start automatically on every boot
+sudo systemctl start phox2-co3-gui    # start now without rebooting
+```
+
+#### 3. Verify it is running
+
+```bash
+sudo systemctl status phox2-co3-gui
+```
+
+The service takes a few seconds to initialise hardware. Once running, the GUI is available:
+- On the Pi itself: http://localhost:8000
+- From another machine: `http://<raspberry-pi-ip>:8000`
+
+If you have UFW active, allow port 8000 first:
+
+```bash
+sudo ufw allow 8000
+```
+
+#### 4. View live logs
+
+```bash
+journalctl -u phox2-co3-gui -f
+```
+
+#### 5. Stop or disable
+
+```bash
+sudo systemctl stop phox2-co3-gui     # stop now (hardware reaches safe state)
+sudo systemctl disable phox2-co3-gui  # do not start on next boot
+```
+
+#### Customising interval and salinity
+
+Edit `configs/co3_config.yaml` before copying the service file:
+
+```yaml
+continuous:
+  interval_s: 300    # seconds between measurements
+  autostart: true    # must be true for the service to start measurements automatically
+
+measurement:
+  salinity: 35.0     # default salinity (PSU) when Ferrybox is not providing live data
+```
+
+Alternatively, override individual keys in the `ExecStart` line of the service file and
+reload: `sudo systemctl daemon-reload && sudo systemctl restart phox2-co3-gui`.
+
+#### Cron alternative (simpler, no restart-on-failure)
+
+If you only need scheduled single measurements rather than a persistent GUI + loop:
+
+```bash
+crontab -e
+
+# CO3 every hour, log to file:
+0 * * * * cd /home/pi/pHox2 && .venv/bin/python scripts/run_single_measurement.py \
+  --config-name co3_config hardware.use_mock=false >> ~/phox2.log 2>&1
 ```
 
 ---

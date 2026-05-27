@@ -77,9 +77,18 @@ measurement:
   drain_after: true          # drain cuvette after each measurement
   drain_time_s: 60.0
 
+  salinity: 35.0              # default salinity (PSU) used when Ferrybox is disabled
+
   # Divide all asyncio.sleep durations by this factor.
   # Set > 1 (e.g. 100) for fast mock runs; leave at 1 for real hardware.
   time_acceleration: 100
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Continuous measurement (GUI autostart and loop control)
+# ──────────────────────────────────────────────────────────────────────────────
+continuous:
+  interval_s: 300             # seconds to wait between measurements
+  autostart: false            # set to true to start the loop automatically on GUI launch
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Ship / platform

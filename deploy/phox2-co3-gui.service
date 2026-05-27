@@ -1,0 +1,31 @@
+[Unit]
+Description=phox2 CO3 Instrument — GUI + Continuous Measurements
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pHox2
+
+# Adjust continuous.interval_s and measurement.salinity here if needed.
+ExecStart=/home/pi/pHox2/.venv/bin/python scripts/run_gui.py \
+    --config-name co3_config \
+    hardware.use_mock=false \
+    continuous.autostart=true
+
+# Restart automatically after crashes; wait 30 s before retrying.
+Restart=on-failure
+RestartSec=30
+
+# SIGTERM triggers uvicorn's graceful shutdown → lifespan cleanup → api.disconnect().
+# 120 s gives the hardware time to reach safe state (valve open, lamp off, shutter closed).
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=phox2-co3
+
+[Install]
+WantedBy=multi-user.target

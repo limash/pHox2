@@ -138,6 +138,12 @@ class InstrumentState:
         self.interval_s: float = float(
             OmegaConf.select(cfg, "continuous.interval_s", default=300.0)
         )
+        self._autostart: bool = bool(
+            OmegaConf.select(cfg, "continuous.autostart", default=False)
+        )
+        self._autostart_salinity: float = float(
+            OmegaConf.select(cfg, "measurement.salinity", default=35.0)
+        )
         self.n_cycles: int = int(
             OmegaConf.select(cfg, "measurement.n_cycles", default=1)
         )
@@ -170,6 +176,16 @@ class InstrumentState:
 
         self._sensor_task = asyncio.create_task(self._sensor_poll(), name="sensor_poll")
         self._spectrum_task = asyncio.create_task(self._spectrum_poll(), name="spectrum_poll")
+
+        if self._autostart:
+            logger.info(
+                "Autostart: launching continuous measurements (salinity=%.2f, interval=%.0fs)",
+                self._autostart_salinity,
+                self.interval_s,
+            )
+            self._continuous_task = asyncio.create_task(
+                self._continuous_loop(self._autostart_salinity), name="continuous"
+            )
 
     async def shutdown(self) -> None:
         logger.info("GUI: shutdown — cancelling background tasks…")
