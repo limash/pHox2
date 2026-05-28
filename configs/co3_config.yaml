@@ -38,7 +38,7 @@ adc:
 # ──────────────────────────────────────────────────────────────────────────────
 temperature:
   # T_cuvette (°C) = coef[0] * voltage + coef[1]
-  calibration_coefficients: [-1.234, 15.678]
+  calibration_coefficients: [46.142, 16.278]  # probe 14
   n_averages: 3
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ co3:
 measurement:
   cuvette_volume_ml: 16.0
   dye_volume_per_shot_ml: 0.03
-  dye_n_shots: 6             # solenoid pulses per injection event
+  dye_n_shots: 3             # solenoid pulses per injection event
   n_cycles: 1                # dye injection + absorbance cycles per measurement
   mix_time_s: 10.0           # stirring time after dye injection
   wait_time_s: 5.0           # settling time after stirrer stops
