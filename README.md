@@ -200,6 +200,40 @@ source .venv/bin/activate
 pip install -e ".[hardware,gui]"
 ```
 
+**ADCDifferentialPi** is not on PyPI and must be installed manually — download the single
+module file directly into the venv:
+
+```bash
+wget https://raw.githubusercontent.com/abelectronicsuk/ABElectronics_Python_Libraries/master/ADCDifferentialPi/ADCDifferentialPi.py \
+  -O .venv/lib/python3.13/site-packages/ADCDifferentialPi.py
+```
+
+Install the seabreeze udev rules so that the `pi` user can open the USB spectrometer
+without root privileges:
+
+```bash
+sudo .venv/bin/seabreeze_os_setup
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+`seabreeze_os_setup` may fail silently on some Raspberry Pi OS versions. Verify a rules
+file was created:
+
+```bash
+ls /etc/udev/rules.d/ | grep -i seabreeze
+```
+
+If the output is empty, create the rule manually (Ocean Optics vendor ID is `2457`):
+
+```bash
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2457", MODE="0664", GROUP="plugdev"' \
+  | sudo tee /etc/udev/rules.d/99-oceanoptics.rules
+
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Unplug and replug the spectrometer after applying the rules.
+
 #### 5. Update Configuration
 
 Edit `configs/co3_config.yaml` or `configs/ph_config.yaml` to match your hardware:
