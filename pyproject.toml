@@ -14,7 +14,7 @@ dependencies = [
 hardware = [
     "seabreeze>=1.4",
     "lgpio>=0.2",
-    # ADCDifferentialPi is typically system-installed on RPi
+    "ADCDifferentialPi>=0.0.4",
 ]
 gui = [
     "fastapi>=0.111",
