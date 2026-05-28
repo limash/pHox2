@@ -14,7 +14,9 @@ dependencies = [
 hardware = [
     "seabreeze>=1.4",
     "lgpio>=0.2",
-    "ADCDifferentialPi>=0.0.4",
+    # ADCDifferentialPi is not on PyPI — install manually on the Pi:
+    #   wget https://raw.githubusercontent.com/abelectronicsuk/ABElectronics_Python_Libraries/master/ADCDifferentialPi/ADCDifferentialPi.py \
+    #     -O .venv/lib/python3.13/site-packages/ADCDifferentialPi.py
 ]
 gui = [
     "fastapi>=0.111",
