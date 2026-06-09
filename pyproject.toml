@@ -19,15 +19,6 @@ hardware = [
     #   wget https://raw.githubusercontent.com/abelectronicsuk/ABElectronics_Python_Libraries/master/ADCDifferentialPi/ADCDifferentialPi.py \
     #     -O .venv/lib/python3.13/site-packages/ADCDifferentialPi.py
 ]
-gui = [
-    "fastapi>=0.111",
-    "uvicorn[standard]>=0.29",
-    "websockets>=12",
-]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-]
 
 [project.scripts]
 phox2-measure = "phox2.scripts.run_single_measurement:main"
@@ -38,6 +29,20 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/phox2"]
+
+[dependency-groups]
+gui = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "websockets>=12",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.uv]
+default-groups = ["dev", "gui"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

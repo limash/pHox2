@@ -8,9 +8,10 @@ Two classes are provided:
     UDP socket, caches the latest incoming Ferrybox packet, and can transmit
     measurement results back to the Ferrybox host.
 
-``NullFerryboxClient``
-    No-op implementation used when ``ferrybox.enabled`` is ``false`` in the
-    config.  All methods are safe to call and do nothing.
+``StaticFerryboxClient``
+    Stub used when ``ferrybox.enabled`` is ``false``.  Always returns a
+    ``FerryboxData`` with a fixed salinity so that the API can always read
+    salinity from the Ferrybox interface regardless of configuration.
 """
 from __future__ import annotations
 
@@ -170,22 +171,29 @@ class FerryboxUDPClient(IFerryboxClient):
         )
 
 
-class NullFerryboxClient(IFerryboxClient):
+class StaticFerryboxClient(IFerryboxClient):
     """
-    No-op Ferrybox client used when ``ferrybox.enabled: false``.
+    Stub Ferrybox client used when ``ferrybox.enabled: false``.
 
-    Safe to inject into both instrument APIs: all methods do nothing and
-    ``get_latest_data()`` always returns ``None``.
+    Always returns a ``FerryboxData`` with a fixed salinity so the API can
+    read salinity from the Ferrybox interface in all configurations.
     """
+
+    def __init__(self, salinity: float = 35.0) -> None:
+        self._salinity = salinity
+
+    def get_latest_data(self) -> FerryboxData:
+        return FerryboxData(
+            salinity=self._salinity,
+            timestamp=datetime.now(tz=timezone.utc),
+            temperature=None,
+        )
 
     async def start(self) -> None:
         pass
 
     async def stop(self) -> None:
         pass
-
-    def get_latest_data(self) -> FerryboxData | None:
-        return None
 
     async def send_result(self, result: IUDPPayload) -> None:
         pass

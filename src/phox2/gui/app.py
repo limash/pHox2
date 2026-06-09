@@ -149,9 +149,6 @@ class InstrumentState:
         self._autostart: bool = bool(
             OmegaConf.select(cfg, "continuous.autostart", default=False)
         )
-        self._autostart_salinity: float = float(
-            OmegaConf.select(cfg, "measurement.salinity", default=35.0)
-        )
         self.n_cycles: int = int(
             OmegaConf.select(cfg, "measurement.n_cycles", default=1)
         )
@@ -201,12 +198,11 @@ class InstrumentState:
 
         if self._autostart:
             logger.info(
-                "Autostart: launching continuous measurements (salinity=%.2f, interval=%.0fs)",
-                self._autostart_salinity,
+                "Autostart: launching continuous measurements (interval=%.0fs)",
                 self.interval_s,
             )
             self._continuous_task = asyncio.create_task(
-                self._continuous_loop(self._autostart_salinity), name="continuous"
+                self._continuous_loop(), name="continuous"
             )
 
     async def shutdown(self) -> None:
@@ -287,7 +283,7 @@ class InstrumentState:
 
     # ── Measurement ───────────────────────────────────────────────────────
 
-    async def _run_measurement(self, salinity: float, flush_before: bool) -> None:
+    async def _run_measurement(self, flush_before: bool) -> None:
         self.modes.add("Measuring")
         self._spectrum_paused = True
         await self._broadcast_mode()
@@ -302,7 +298,6 @@ class InstrumentState:
         try:
             assert self._api is not None
             result = await self._api.run_single_measurement(
-                salinity=salinity,
                 flush_before=flush_before,
                 on_step=on_step,
             )
@@ -320,7 +315,7 @@ class InstrumentState:
             self._spectrum_paused = False
             await self._broadcast_mode()
 
-    async def _continuous_loop(self, salinity: float) -> None:
+    async def _continuous_loop(self) -> None:
         self.modes.add("Continuous")
         self._stop_continuous.clear()
         await self._broadcast_mode()
@@ -332,7 +327,7 @@ class InstrumentState:
             first = True
             while not self._stop_continuous.is_set():
                 self.measurement_n += 1
-                await self._run_measurement(salinity=salinity, flush_before=not first)
+                await self._run_measurement(flush_before=not first)
                 first = False
 
                 if self._stop_continuous.is_set():
@@ -367,9 +362,8 @@ class InstrumentState:
             case "start_continuous":
                 if "Continuous" in self.modes or "Measuring" in self.modes:
                     return
-                salinity = float(msg.get("salinity", 35.0))
                 self._continuous_task = asyncio.create_task(
-                    self._continuous_loop(salinity), name="continuous"
+                    self._continuous_loop(), name="continuous"
                 )
 
             case "stop_continuous":
@@ -378,10 +372,9 @@ class InstrumentState:
             case "start_single":
                 if "Measuring" in self.modes:
                     return
-                salinity = float(msg.get("salinity", 35.0))
                 self.measurement_n += 1
                 asyncio.create_task(
-                    self._run_measurement(salinity=salinity, flush_before=False),
+                    self._run_measurement(flush_before=False),
                     name="single_measurement",
                 )
 
@@ -651,7 +644,10 @@ def create_app(cfg: DictConfig, config_path: Path | None = None) -> FastAPI:
 
     @app.get("/")
     async def root() -> FileResponse:
-        return FileResponse(str(_STATIC_DIR / "index.html"))
+        return FileResponse(
+            str(_STATIC_DIR / "index.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/history")
     async def history() -> list:

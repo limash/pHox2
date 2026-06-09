@@ -42,10 +42,6 @@ from phox2.storage.file_storage import CO3FileStorage, pHFileStorage
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SALINITY = 35.0
-_DEFAULT_INTERVAL_S = 300
-
-
 @hydra.main(
     version_base=None,
     config_path=str(Path(__file__).parent.parent / "configs"),
@@ -62,29 +58,22 @@ def main(cfg: DictConfig) -> None:
         OmegaConf.select(cfg, "instrument_type", default="co3")
     ).lower()
 
-    salinity: float = float(
-        OmegaConf.select(cfg, "measurement.salinity", default=_DEFAULT_SALINITY)
-    )
-
-    interval_s: float = float(
-        OmegaConf.select(cfg, "continuous.interval_s", default=_DEFAULT_INTERVAL_S)
-    )
+    interval_s: float = float(cfg.continuous.interval_s)
 
     logger.info("=" * 60)
     logger.info("%s Instrument — Continuous Measurement", instrument_type.upper())
     logger.info("  hardware.use_mock = %s", cfg.hardware.use_mock)
-    logger.info("  salinity          = %.3f PSU", salinity)
     logger.info("  interval_s        = %.0f s", interval_s)
     logger.info("  Press Ctrl-C to stop safely after the current measurement.")
     logger.info("=" * 60)
 
     if instrument_type == "ph":
-        asyncio.run(_run_ph(cfg, salinity, interval_s))
+        asyncio.run(_run_ph(cfg, interval_s))
     else:
-        asyncio.run(_run_co3(cfg, salinity, interval_s))
+        asyncio.run(_run_co3(cfg, interval_s))
 
 
-async def _run_co3(cfg: DictConfig, salinity: float, interval_s: float) -> None:
+async def _run_co3(cfg: DictConfig, interval_s: float) -> None:
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -100,7 +89,6 @@ async def _run_co3(cfg: DictConfig, salinity: float, interval_s: float) -> None:
 
             try:
                 result = await api.run_single_measurement(
-                    salinity=salinity,
                     flush_before=(measurement_n > 1),
                 )
             except Exception:
@@ -130,7 +118,7 @@ async def _run_co3(cfg: DictConfig, salinity: float, interval_s: float) -> None:
     logger.info("CO3 continuous measurement stopped. Hardware cleaned up.")
 
 
-async def _run_ph(cfg: DictConfig, salinity: float, interval_s: float) -> None:
+async def _run_ph(cfg: DictConfig, interval_s: float) -> None:
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -146,7 +134,6 @@ async def _run_ph(cfg: DictConfig, salinity: float, interval_s: float) -> None:
 
             try:
                 result = await api.run_single_measurement(
-                    salinity=salinity,
                     flush_before=(measurement_n > 1),
                 )
             except Exception:

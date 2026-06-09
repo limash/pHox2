@@ -78,8 +78,6 @@ measurement:
   drain_time_s: 60.0
   time_acceleration: 100     # divide all sleep durations; set >1 for fast mock runs
 
-  salinity: 35.0              # default salinity (PSU) used when Ferrybox is disabled
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Continuous mode
 # ──────────────────────────────────────────────────────────────────────────────

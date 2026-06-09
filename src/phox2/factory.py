@@ -25,7 +25,7 @@ from phox2.measurement.co3_cycle import (
 )
 from phox2.measurement.ph_cycle import pHConfig, pHMeasurementCycle
 from phox2.communication.interfaces import IFerryboxClient
-from phox2.communication.udp_client import FerryboxUDPClient, NullFerryboxClient
+from phox2.communication.udp_client import FerryboxUDPClient, StaticFerryboxClient
 from phox2.physics.co3_calculator import CO3Calculator
 from phox2.physics.ph_calculator import pHCalculator
 
@@ -232,8 +232,8 @@ class InstrumentFactory:
         """
         fb_cfg = cfg.get("ferrybox", None)
         if fb_cfg is None or not fb_cfg.get("enabled", False):
-            logger.info("Ferrybox communication: disabled (NullFerryboxClient)")
-            return NullFerryboxClient()
+            logger.info("Ferrybox communication: disabled (StaticFerryboxClient)")
+            return StaticFerryboxClient()
 
         client = FerryboxUDPClient(
             ferrybox_host=str(fb_cfg.host),

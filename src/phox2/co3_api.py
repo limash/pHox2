@@ -28,7 +28,7 @@ import numpy as np
 from omegaconf import DictConfig
 
 from phox2.communication.interfaces import IFerryboxClient
-from phox2.communication.udp_client import NullFerryboxClient
+from phox2.communication.udp_client import StaticFerryboxClient
 from phox2.factory import InstrumentFactory
 from phox2.measurement.co3_cycle import CO3MeasurementCycle
 from phox2.measurement.models import CO3MeasurementResult
@@ -48,13 +48,12 @@ class CO3InstrumentAPI:
     cycle:
         Fully wired CO3MeasurementCycle (produced by InstrumentFactory).
     ferrybox_client:
-        Ferrybox UDP client.  Pass ``NullFerryboxClient()`` (default) to
-        disable Ferrybox communication.  Injected by ``from_config()``.
+        Ferrybox UDP client.  Injected by ``from_config()``.
     """
 
     def __init__(self, cycle: CO3MeasurementCycle, ferrybox_client: IFerryboxClient | None = None) -> None:
         self._cycle = cycle
-        self._ferrybox: IFerryboxClient = ferrybox_client if ferrybox_client is not None else NullFerryboxClient()
+        self._ferrybox: IFerryboxClient = ferrybox_client if ferrybox_client is not None else StaticFerryboxClient()
         self._initialised = False
         self._wavelengths: np.ndarray | None = None
 
@@ -120,7 +119,6 @@ class CO3InstrumentAPI:
 
     async def run_single_measurement(
         self,
-        salinity: float,
         flush_before: bool = False,
         on_step: Callable[[str], None] | None = None,
     ) -> CO3MeasurementResult:
@@ -129,9 +127,6 @@ class CO3InstrumentAPI:
 
         Parameters
         ----------
-        salinity:
-            In-situ salinity (PSU).  Used for dilution correction.
-            Typically from a Ferrybox or manual entry.
         flush_before:
             If True, run the water pump before measuring to flush stale
             sample out of the cuvette.
@@ -149,8 +144,11 @@ class CO3InstrumentAPI:
         """
         self._require_connected()
         fb = self._ferrybox.get_latest_data()
-        fb_temp = fb.temperature if fb is not None else None
-        fb_sal = fb.salinity if fb is not None else None
+        if fb is None:
+            raise RuntimeError("No Ferrybox data available — cannot determine salinity")
+        salinity = fb.salinity
+        fb_temp = fb.temperature
+        fb_sal = fb.salinity
         logger.info("Starting single CO3 measurement (S=%.3f)", salinity)
         result = await self._cycle.run(
             salinity=salinity,
@@ -165,12 +163,7 @@ class CO3InstrumentAPI:
     # ── Ferrybox data ─────────────────────────────────────────────────────
 
     def get_ferrybox_data(self):
-        """
-        Return the most recently received Ferrybox data packet, or ``None``.
-
-        The caller may use this to obtain the current salinity before calling
-        ``run_single_measurement()``.
-        """
+        """Return the most recently received Ferrybox data packet, or ``None``."""
         return self._ferrybox.get_latest_data()
 
     # ── Status / introspection API ────────────────────────────────────────

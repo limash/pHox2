@@ -14,9 +14,6 @@ From the project root (a --config-name is always required):
     # Real hardware on Raspberry Pi:
     uv run scripts/run_single_measurement.py hardware.use_mock=false
 
-    # Override salinity:
-    uv run scripts/run_single_measurement.py measurement.salinity=34.5
-
     # Fast run without draining (useful during bench testing):
     uv run scripts/run_single_measurement.py measurement.drain_after=false
 
@@ -42,9 +39,6 @@ from phox2.storage.file_storage import CO3FileStorage, pHFileStorage
 
 logger = logging.getLogger(__name__)
 
-# Default salinity if not provided by Ferrybox UDP
-_DEFAULT_SALINITY = 35.0
-
 
 @hydra.main(
     version_base=None,
@@ -62,25 +56,20 @@ def main(cfg: DictConfig) -> None:
         OmegaConf.select(cfg, "instrument_type", default="co3")
     ).lower()
 
-    salinity: float = float(
-        OmegaConf.select(cfg, "measurement.salinity", default=_DEFAULT_SALINITY)
-    )
-
     logger.info("=" * 60)
     logger.info("%s Instrument — Single Measurement", instrument_type.upper())
     logger.info("  hardware.use_mock = %s", cfg.hardware.use_mock)
-    logger.info("  salinity          = %.3f PSU", salinity)
     logger.info("  n_cycles          = %d", cfg.measurement.n_cycles)
     logger.info("  time_acceleration = %dx", cfg.measurement.time_acceleration)
     logger.info("=" * 60)
 
     if instrument_type == "ph":
-        asyncio.run(_async_main_ph(cfg, salinity))
+        asyncio.run(_async_main_ph(cfg))
     else:
-        asyncio.run(_async_main_co3(cfg, salinity))
+        asyncio.run(_async_main_co3(cfg))
 
 
-async def _async_main_co3(cfg: DictConfig, salinity: float) -> None:
+async def _async_main_co3(cfg: DictConfig) -> None:
     async with CO3InstrumentAPI.from_config(cfg) as api:
         # ── Optional: show live spectrum before measuring ──────────────
         logger.info("Capturing pre-measurement spectrum…")
@@ -93,10 +82,7 @@ async def _async_main_co3(cfg: DictConfig, salinity: float) -> None:
         )
 
         # ── Run the measurement ───────────────────────────────────────
-        result = await api.run_single_measurement(
-            salinity=salinity,
-            flush_before=False,
-        )
+        result = await api.run_single_measurement(flush_before=False)
 
         # ── Print results ─────────────────────────────────────────────
         print()
@@ -125,7 +111,7 @@ async def _async_main_co3(cfg: DictConfig, salinity: float) -> None:
         logger.info("Results saved to %s/data_co3/", cfg.output.base_path)
 
 
-async def _async_main_ph(cfg: DictConfig, salinity: float) -> None:
+async def _async_main_ph(cfg: DictConfig) -> None:
     async with pHInstrumentAPI.from_config(cfg) as api:
         # ── Show live spectrum before measuring ────────────────────────
         logger.info("Capturing pre-measurement spectrum…")
@@ -137,10 +123,7 @@ async def _async_main_ph(cfg: DictConfig, salinity: float) -> None:
         )
 
         # ── Run the measurement ───────────────────────────────────────
-        result = await api.run_single_measurement(
-            salinity=salinity,
-            flush_before=False,
-        )
+        result = await api.run_single_measurement(flush_before=False)
 
         # ── Print results ─────────────────────────────────────────────
         dye = result.dye

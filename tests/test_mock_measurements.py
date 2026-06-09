@@ -18,7 +18,6 @@ from phox2.measurement.models import CO3MeasurementResult, pHMeasurementResult
 from phox2.ph_api import pHInstrumentAPI
 
 _CONFIGS = Path(__file__).parent.parent / "configs"
-_SALINITY = 35.0
 
 
 @pytest.fixture
@@ -37,18 +36,18 @@ def ph_cfg() -> DictConfig:
 
 async def test_co3_mock_measurement(co3_cfg: DictConfig) -> None:
     async with CO3InstrumentAPI.from_config(co3_cfg) as api:
-        result = await api.run_single_measurement(salinity=_SALINITY, flush_before=False)
+        result = await api.run_single_measurement(flush_before=False)
         assert isinstance(result, CO3MeasurementResult)
         assert isinstance(result.co3_umol_per_kg, float)
         assert isinstance(result.t_cuvette, float)
-        assert result.salinity_input == pytest.approx(_SALINITY)
+        assert result.salinity_input == pytest.approx(35.0)
 
 
 async def test_ph_mock_measurement(ph_cfg: DictConfig) -> None:
     async with pHInstrumentAPI.from_config(ph_cfg) as api:
-        result = await api.run_single_measurement(salinity=_SALINITY, flush_before=False)
+        result = await api.run_single_measurement(flush_before=False)
         assert isinstance(result, pHMeasurementResult)
         assert isinstance(result.pH_cuvette, float)
         assert isinstance(result.t_cuvette, float)
-        assert result.salinity_input == pytest.approx(_SALINITY)
+        assert result.salinity_input == pytest.approx(35.0)
         assert 0.0 <= result.r_square <= 1.0
