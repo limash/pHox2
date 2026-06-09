@@ -173,7 +173,7 @@ class pHMeasurementCycle:
         await self._valve.close()
 
         # ── 2. Auto-adjust integration time ─────────────────────────────
-        if self._adj.enabled:
+        if self._adj.mode != "OFF":
             if on_step:
                 on_step("adjusting_light")
             await self._auto_adjust_integration_time()

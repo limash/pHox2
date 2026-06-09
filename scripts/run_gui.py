@@ -50,7 +50,10 @@ def main(cfg: DictConfig) -> None:
 
     from phox2.gui.app import create_app
 
-    app = create_app(cfg)
+    instrument_type = str(cfg.get("instrument_type", "co3")).lower()
+    config_path = Path(__file__).parent.parent / "configs" / f"{instrument_type}_config.yaml"
+
+    app = create_app(cfg, config_path=config_path)
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 

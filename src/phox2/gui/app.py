@@ -109,9 +109,15 @@ class InstrumentState:
     drivers — it only calls methods on this class.
     """
 
-    def __init__(self, cfg: DictConfig, manager: ConnectionManager) -> None:
+    def __init__(
+        self,
+        cfg: DictConfig,
+        manager: ConnectionManager,
+        config_path: Path | None = None,
+    ) -> None:
         self._cfg = cfg
         self._manager = manager
+        self._config_path = config_path
 
         self.instrument_type: str = str(
             OmegaConf.select(cfg, "instrument_type", default="co3")
@@ -133,7 +139,9 @@ class InstrumentState:
         self._sensor_task: asyncio.Task | None = None
         self._spectrum_task: asyncio.Task | None = None
         self._countdown_task: asyncio.Task | None = None
+        self._test_udp_task: asyncio.Task | None = None
         self._next_measurement_at: float | None = None
+        self._test_udp_active: bool = False
 
         self.interval_s: float = float(
             OmegaConf.select(cfg, "continuous.interval_s", default=300.0)
@@ -151,9 +159,23 @@ class InstrumentState:
         int_time_ms = float(
             OmegaConf.select(cfg, "spectrometer.integration_time_ms", default=18.0)
         )
+        self._config_integration_time_ms: float = int_time_ms
         self._spectrum_interval_s = (
             int_time_ms + max(200.0, min(int_time_ms * 2.0, 1000.0))
         ) / 1000.0
+
+        # Tracked config values (kept in sync with cfg for save_config)
+        dye_key = "ph.dye" if self.instrument_type == "ph" else "co3.dye"
+        self._config_dye: str = str(OmegaConf.select(cfg, dye_key, default=""))
+        self._config_autoadjust: str = str(
+            OmegaConf.select(cfg, "spectrometer.autoadjust.mode", default="ON")
+        )
+        self._config_pump_time_s: float = float(
+            OmegaConf.select(cfg, "measurement.pump_time_s", default=60.0)
+        )
+        self._config_drain_mode: str = (
+            "ON" if OmegaConf.select(cfg, "measurement.drain_after", default=True) else "OFF"
+        )
 
         self._base_path: str = str(
             OmegaConf.select(cfg, "output.base_path", default="~/phox_data")
@@ -194,6 +216,7 @@ class InstrumentState:
             self._sensor_task,
             self._spectrum_task,
             self._countdown_task,
+            self._test_udp_task,
         ):
             if task and not task.done():
                 task.cancel()
@@ -252,6 +275,15 @@ class InstrumentState:
                     {"type": "countdown", "seconds_remaining": int(remaining)}
                 )
             await asyncio.sleep(15)
+
+    async def _test_udp_loop(self) -> None:
+        counter = 0
+        while True:
+            counter += 1
+            await self._manager.broadcast(
+                {"type": "log_line", "text": f"[TEST UDP] broadcast #{counter}"}
+            )
+            await asyncio.sleep(10)
 
     # ── Measurement ───────────────────────────────────────────────────────
 
@@ -400,6 +432,78 @@ class InstrumentState:
 
                 asyncio.create_task(_adjust(), name="auto_adjust")
 
+            # ── Config commands ───────────────────────────────────────
+
+            case "save_config":
+                if self._config_path is not None:
+                    try:
+                        OmegaConf.save(self._cfg, self._config_path)
+                        logger.info("Config saved to %s", self._config_path)
+                    except Exception:
+                        logger.exception("Failed to save config")
+                else:
+                    logger.warning("save_config: no config_path set")
+
+            case "toggle_test_udp":
+                if self._test_udp_active:
+                    self._test_udp_active = False
+                    if self._test_udp_task and not self._test_udp_task.done():
+                        self._test_udp_task.cancel()
+                    self._test_udp_task = None
+                    logger.info("Test UDP stopped")
+                else:
+                    self._test_udp_active = True
+                    self._test_udp_task = asyncio.create_task(
+                        self._test_udp_loop(), name="test_udp"
+                    )
+                    logger.info("Test UDP started")
+                await self._manager.broadcast(
+                    {"type": "config_update", "test_udp_active": self._test_udp_active}
+                )
+
+            case "set_dye_type":
+                dye = str(msg.get("dye", ""))
+                if not dye:
+                    return
+                self._config_dye = dye
+                dye_key = "ph.dye" if self.instrument_type == "ph" else "co3.dye"
+                OmegaConf.update(self._cfg, dye_key, dye)
+                await self._broadcast_config()
+
+            case "set_autoadjust":
+                mode = str(msg.get("mode", "ON"))
+                if mode not in ("ON", "OFF", "ON_NORED"):
+                    return
+                self._config_autoadjust = mode
+                OmegaConf.update(self._cfg, "spectrometer.autoadjust.mode", mode)
+                await self._broadcast_config()
+
+            case "set_sampling_interval":
+                minutes = float(msg.get("interval_min", 5.0))
+                self.interval_s = minutes * 60.0
+                OmegaConf.update(self._cfg, "continuous.interval_s", self.interval_s)
+                await self._broadcast_config()
+
+            case "set_integration_time":
+                time_ms = float(msg.get("time_ms", 18.0))
+                self._config_integration_time_ms = time_ms
+                self._spectrum_interval_s = (
+                    time_ms + max(200.0, min(time_ms * 2.0, 1000.0))
+                ) / 1000.0
+                OmegaConf.update(self._cfg, "spectrometer.integration_time_ms", time_ms)
+                asyncio.create_task(api.set_integration_time(time_ms))
+                await self._broadcast_config()
+
+            case "set_drain_mode":
+                drain_mode = str(msg.get("mode", "ON"))
+                if drain_mode not in ("ON", "OFF"):
+                    return
+                self._config_drain_mode = drain_mode
+                OmegaConf.update(
+                    self._cfg, "measurement.drain_after", drain_mode == "ON"
+                )
+                await self._broadcast_config()
+
     # ── Helpers ───────────────────────────────────────────────────────────
 
     async def _broadcast_mode(self) -> None:
@@ -411,6 +515,22 @@ class InstrumentState:
             }
         )
 
+    async def _broadcast_config(self) -> None:
+        await self._manager.broadcast(
+            {"type": "config_update", **self._config_dict()}
+        )
+
+    def _config_dict(self) -> dict:
+        return {
+            "dye": self._config_dye,
+            "autoadjust_mode": self._config_autoadjust,
+            "pump_time_s": self._config_pump_time_s,
+            "interval_min": self.interval_s / 60.0,
+            "integration_time_ms": self._config_integration_time_ms,
+            "drain_mode": self._config_drain_mode,
+            "test_udp_active": self._test_udp_active,
+        }
+
     def state_snapshot(self) -> dict:
         return {
             "type": "state_snapshot",
@@ -421,6 +541,7 @@ class InstrumentState:
             "wavelengths": self.wavelengths,
             "n_cycles": self.n_cycles,
             "interval_s": self.interval_s,
+            "config": self._config_dict(),
         }
 
 
@@ -508,9 +629,9 @@ def _load_history(instrument_type: str, base_path: str) -> list[dict]:
 
 # ── App factory ───────────────────────────────────────────────────────────────
 
-def create_app(cfg: DictConfig) -> FastAPI:
+def create_app(cfg: DictConfig, config_path: Path | None = None) -> FastAPI:
     manager = ConnectionManager()
-    state = InstrumentState(cfg, manager)
+    state = InstrumentState(cfg, manager, config_path=config_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[type-arg]

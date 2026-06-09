@@ -244,6 +244,146 @@
           </div>
         </template><!-- /manual -->
 
+        <!-- ════════ CONFIG TAB ════════ -->
+        <template v-if="activeTab === 'config'">
+
+          <!-- Action buttons -->
+          <div class="flex gap-2">
+            <button @click="saveConfig" :disabled="!canEditConfig" class="btn-primary">
+              Save Config
+            </button>
+            <button @click="toggleTestUdp" :disabled="!canEditConfig"
+                    class="btn-toggle" :class="{ 'btn-active': testUdpActive }">
+              {{ testUdpActive ? 'Stop Test UDP' : 'Start Test UDP' }}
+            </button>
+          </div>
+
+          <!-- Configuration table -->
+          <div class="card">
+            <div class="card-title">Configuration</div>
+            <table class="w-full text-sm">
+
+              <!-- DYE type -->
+              <tr class="border-b border-gray-700">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap w-1/2">DYE type</td>
+                <td class="py-2">
+                  <select v-model="configDye" @change="onDyeChange" @wheel.prevent
+                          :disabled="!canEditConfig"
+                          class="w-full bg-gray-700 border border-gray-600 rounded
+                                 px-2 py-1 text-sm disabled:opacity-40">
+                    <template v-if="isCo3">
+                      <option value="Pb_perchlor">Pb_perchlor</option>
+                    </template>
+                    <template v-else>
+                      <option value="TB">TB</option>
+                      <option value="MCP">MCP</option>
+                    </template>
+                  </select>
+                </td>
+              </tr>
+
+              <!-- Autoadjust state -->
+              <tr class="border-b border-gray-700">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Autoadjust state</td>
+                <td class="py-2">
+                  <select v-model="configAutoadjust" @change="onAutoadjustChange" @wheel.prevent
+                          :disabled="!canEditConfig"
+                          class="w-full bg-gray-700 border border-gray-600 rounded
+                                 px-2 py-1 text-sm disabled:opacity-40">
+                    <option value="ON">ON</option>
+                    <option value="OFF">OFF</option>
+                    <option value="ON_NORED">ON_NORED</option>
+                  </select>
+                </td>
+              </tr>
+
+              <!-- Pumping time (read-only) -->
+              <tr class="border-b border-gray-700">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Pumping time (s)</td>
+                <td class="py-2 font-mono text-white">{{ configPumpTime }}</td>
+              </tr>
+
+              <!-- Sampling interval -->
+              <tr class="border-b border-gray-700">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Sampling interval (min)</td>
+                <td class="py-2">
+                  <select v-model.number="configIntervalMin" @change="onIntervalChange" @wheel.prevent
+                          :disabled="!canEditConfig || isContinuous"
+                          class="w-full bg-gray-700 border border-gray-600 rounded
+                                 px-2 py-1 text-sm disabled:opacity-40">
+                    <option v-for="m in [5,7,10,15,20,30,60]" :key="m" :value="m">{{ m }}</option>
+                  </select>
+                </td>
+              </tr>
+
+              <!-- Spectrometer integration time -->
+              <tr class="border-b border-gray-700">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Spectro integration time (ms)</td>
+                <td class="py-2">
+                  <select v-model.number="configIntTimeMs" @change="onIntTimeChange" @wheel.prevent
+                          :disabled="!canEditConfig"
+                          class="w-full bg-gray-700 border border-gray-600 rounded
+                                 px-2 py-1 text-sm disabled:opacity-40">
+                    <option v-for="t in intTimeOptions" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </td>
+              </tr>
+
+              <!-- Drain mode (CO3 only) -->
+              <tr v-if="isCo3">
+                <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Drain mode</td>
+                <td class="py-2">
+                  <select v-model="configDrainMode" @change="onDrainModeChange" @wheel.prevent
+                          :disabled="!canEditConfig"
+                          class="w-full bg-gray-700 border border-gray-600 rounded
+                                 px-2 py-1 text-sm disabled:opacity-40">
+                    <option value="ON">ON</option>
+                    <option value="OFF">OFF</option>
+                  </select>
+                </td>
+              </tr>
+
+            </table>
+          </div>
+
+          <!-- Manual salinity group -->
+          <div class="card">
+            <div class="card-title">Salinity used for manual measurement</div>
+            <div class="flex items-center gap-1 text-sm">
+              <!-- Whole part (0–39) -->
+              <select v-model.number="salWhole" @wheel.prevent
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 w-16 text-center">
+                <option v-for="n in Array.from({length:40},(_,i)=>i)" :key="n" :value="n">
+                  {{ String(n).padStart(2,'0') }}
+                </option>
+              </select>
+              <span class="text-gray-400">.</span>
+              <!-- First decimal (0–9) -->
+              <select v-model.number="salDec1" @wheel.prevent
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 w-12 text-center">
+                <option v-for="n in Array.from({length:10},(_,i)=>i)" :key="n" :value="n">{{ n }}</option>
+              </select>
+              <!-- Second decimal (0–9) -->
+              <select v-model.number="salDec2" @wheel.prevent
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 w-12 text-center">
+                <option v-for="n in Array.from({length:10},(_,i)=>i)" :key="n" :value="n">{{ n }}</option>
+              </select>
+              <!-- Third decimal (0–9) -->
+              <select v-model.number="salDec3" @wheel.prevent
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 w-12 text-center">
+                <option v-for="n in Array.from({length:10},(_,i)=>i)" :key="n" :value="n">{{ n }}</option>
+              </select>
+              <span class="ml-3 font-mono text-white">
+                = {{ salinityFromPicker.toFixed(3) }} PSU
+              </span>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">
+              Used for single / manual measurements. Continuous mode uses Ferrybox salinity.
+            </p>
+          </div>
+
+        </template><!-- /config -->
+
         <!-- ════════ LOG TAB ════════ -->
         <template v-if="activeTab === 'log'">
           <div class="flex justify-between items-center">
@@ -300,6 +440,21 @@ createApp({
 
     const logArea = ref(null);  // textarea DOM ref
 
+    // Config tab state
+    const configDye          = ref('');
+    const configAutoadjust   = ref('ON');
+    const configPumpTime     = ref(60.0);
+    const configIntervalMin  = ref(5);
+    const configIntTimeMs    = ref(18);
+    const configDrainMode    = ref('ON');
+    const testUdpActive      = ref(false);
+
+    // Salinity picker (XX.YYY)
+    const salWhole  = ref(35);
+    const salDec1   = ref(0);
+    const salDec2   = ref(0);
+    const salDec3   = ref(0);
+
     // Chart.js instances (not reactive — plain JS objects)
     let spectrumChart = null;
     let resultChart   = null;
@@ -312,6 +467,19 @@ createApp({
     const canStartSingle     = computed(() => !isMeasuring.value && !isContinuous.value && !isAdjusting.value);
     const canToggleContinuous = computed(() => !isMeasuring.value && !isAdjusting.value);
     const canToggleManual    = computed(() => !isMeasuring.value && !isAdjusting.value);
+    const canEditConfig      = computed(() => !isMeasuring.value && !isAdjusting.value);
+
+    const salinityFromPicker = computed(() =>
+      salWhole.value + salDec1.value / 10 + salDec2.value / 100 + salDec3.value / 1000
+    );
+
+    const intTimeOptions = computed(() => {
+      const opts = [];
+      for (let t = 1; t <= 19; t++) opts.push(t);
+      for (let t = 20; t <= 90; t += 10) opts.push(t);
+      for (let t = 100; t <= 4900; t += 100) opts.push(t);
+      return opts;
+    });
 
     const instrumentTitle  = computed(() => isCo3.value ? 'CO₃ Instrument' : 'pH Instrument');
     const resultChartTitle = computed(() =>
@@ -321,6 +489,7 @@ createApp({
     const tabs = [
       { id: 'home',   label: 'Home'   },
       { id: 'manual', label: 'Manual' },
+      { id: 'config', label: 'Config' },
       { id: 'log',    label: 'Log'    },
     ];
 
@@ -409,6 +578,7 @@ createApp({
           lastResult.value     = msg.last_result     || null;
           nCycles.value        = msg.n_cycles        || 1;
           wavelengths.value    = msg.wavelengths     || [];
+          if (msg.config) applyConfig(msg.config);
           if (wavelengths.value.length && spectrumChart) {
             spectrumChart.data.labels = wavelengths.value.map(w => Math.round(w));
             spectrumChart.update('none');
@@ -495,6 +665,10 @@ createApp({
           });
           break;
 
+        case 'config_update':
+          applyConfig(msg);
+          break;
+
         case 'history':
           if (!isCo3.value && resultChart && msg.points && msg.points.length) {
             resultChart.data.labels          = msg.points.map(p => p.timestamp || '');
@@ -519,6 +693,25 @@ createApp({
     const pulseDyePump  = () => send({ cmd: 'pulse_dye_pump', n_shots: 3 });
     const drainCuvette  = () => send({ cmd: 'drain_cuvette' });
     const autoAdjust    = () => send({ cmd: 'auto_adjust' });
+
+    // ── Config helpers ────────────────────────────────────────────
+    const applyConfig = (c) => {
+      if (c.dye             != null) configDye.value         = c.dye;
+      if (c.autoadjust_mode != null) configAutoadjust.value  = c.autoadjust_mode;
+      if (c.pump_time_s     != null) configPumpTime.value    = c.pump_time_s;
+      if (c.interval_min    != null) configIntervalMin.value = Math.round(c.interval_min);
+      if (c.integration_time_ms != null) configIntTimeMs.value = c.integration_time_ms;
+      if (c.drain_mode      != null) configDrainMode.value   = c.drain_mode;
+      if (c.test_udp_active != null) testUdpActive.value     = c.test_udp_active;
+    };
+
+    const saveConfig         = () => send({ cmd: 'save_config' });
+    const toggleTestUdp      = () => send({ cmd: 'toggle_test_udp' });
+    const onDyeChange        = ()  => send({ cmd: 'set_dye_type', dye: configDye.value });
+    const onAutoadjustChange = ()  => send({ cmd: 'set_autoadjust', mode: configAutoadjust.value });
+    const onIntervalChange   = ()  => send({ cmd: 'set_sampling_interval', interval_min: configIntervalMin.value });
+    const onIntTimeChange    = ()  => send({ cmd: 'set_integration_time', time_ms: configIntTimeMs.value });
+    const onDrainModeChange  = ()  => send({ cmd: 'set_drain_mode', mode: configDrainMode.value });
 
     // ── Chart initialisation ──────────────────────────────────────
     const initCharts = () => {
@@ -620,15 +813,21 @@ createApp({
       activeTab, nCycles, wavelengths, manualActive,
       valveOpen, lightOn, shutterOpen, stirrerOn,
       logArea,
+      configDye, configAutoadjust, configPumpTime, configIntervalMin,
+      configIntTimeMs, configDrainMode, testUdpActive,
+      salWhole, salDec1, salDec2, salDec3,
       // Computed
       isCo3, isMeasuring, isContinuous, isAdjusting,
-      canStartSingle, canToggleContinuous, canToggleManual,
+      canStartSingle, canToggleContinuous, canToggleManual, canEditConfig,
       instrumentTitle, resultChartTitle, tabs, progressSteps,
       statusText, statusBarClass, lastResultRows, sensorRows,
+      salinityFromPicker, intTimeOptions,
       // Commands
       startSingle, toggleContinuous, toggleManual,
       toggleValve, toggleLight, toggleShutter, toggleStirrer,
       runWaterPump, pulseDyePump, drainCuvette, autoAdjust,
+      saveConfig, toggleTestUdp,
+      onDyeChange, onAutoadjustChange, onIntervalChange, onIntTimeChange, onDrainModeChange,
     };
   },
 }).mount('#app');

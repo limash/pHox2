@@ -46,7 +46,7 @@ spectrometer:
   n_averages: 6
   light_threshold_counts: 60000
   autoadjust:
-    enabled: true
+    mode: "ON"                   # ON | OFF | ON_NORED
     tolerance_fraction: 0.05
     max_iterations: 20
     step_ms: 500
@@ -77,6 +77,13 @@ tris_buffer:
   temperature: 20                # nominal calibration temperature (°C)
   calibration_threshold: 0.005   # max |ΔpH| between measured and theoretical
   pump_time_s: 30                # seconds to pump calibration solution
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Continuous mode
+# ──────────────────────────────────────────────────────────────────────────────
+continuous:
+  interval_s: 300              # seconds between automatic measurements
+  autostart: false             # start continuous mode automatically on launch
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Measurement cycle

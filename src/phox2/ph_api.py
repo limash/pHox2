@@ -244,6 +244,12 @@ class pHInstrumentAPI:
         """
         self._require_connected()
         await self._cycle._auto_adjust_integration_time()
+
+    async def set_integration_time(self, time_ms: float) -> None:
+        """Set the spectrometer integration time immediately (milliseconds)."""
+        self._require_connected()
+        self._cycle._integration_time_ms = time_ms
+        await self._cycle._spec.set_integration_time(time_ms)
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _require_connected(self) -> None:

@@ -49,7 +49,7 @@ spectrometer:
   n_averages: 6
   light_threshold_counts: 60000  # target intensity for auto-adjust
   autoadjust:
-    enabled: true
+    mode: "ON"                   # ON | OFF | ON_NORED
     tolerance_fraction: 0.05     # ±5 % around target
     max_iterations: 20
     step_ms: 500                 # integration-time step during binary search
@@ -76,19 +76,16 @@ measurement:
   pump_time_s: 60.0          # sample flush duration before measurement
   drain_after: true          # drain cuvette after each measurement
   drain_time_s: 60.0
+  time_acceleration: 100     # divide all sleep durations; set >1 for fast mock runs
 
   salinity: 35.0              # default salinity (PSU) used when Ferrybox is disabled
 
-  # Divide all asyncio.sleep durations by this factor.
-  # Set > 1 (e.g. 100) for fast mock runs; leave at 1 for real hardware.
-  time_acceleration: 100
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Continuous measurement (GUI autostart and loop control)
+# Continuous mode
 # ──────────────────────────────────────────────────────────────────────────────
 continuous:
-  interval_s: 300             # seconds to wait between measurements
-  autostart: false            # set to true to start the loop automatically on GUI launch
+  interval_s: 300              # seconds between automatic measurements
+  autostart: false             # start continuous mode automatically on launch
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Ship / platform

@@ -90,7 +90,7 @@ class CO3Config:
 
 @dataclass
 class SpectrometerAdjustConfig:
-    enabled: bool
+    mode: str  # "ON" | "OFF" | "ON_NORED"
     tolerance_fraction: float
     max_iterations: int
     step_ms: float
@@ -98,7 +98,7 @@ class SpectrometerAdjustConfig:
     @classmethod
     def from_omegaconf(cls, cfg) -> "SpectrometerAdjustConfig":
         return cls(
-            enabled=bool(cfg.enabled),
+            mode=str(cfg.mode),
             tolerance_fraction=float(cfg.tolerance_fraction),
             max_iterations=int(cfg.max_iterations),
             step_ms=float(cfg.step_ms),
@@ -218,7 +218,7 @@ class CO3MeasurementCycle:
         await self._valve.close()
 
         # ── 2. Auto-adjust integration time ─────────────────────────────
-        if self._adj.enabled:
+        if self._adj.mode != "OFF":
             if on_step:
                 on_step("adjusting_light")
             await self._auto_adjust_integration_time()
