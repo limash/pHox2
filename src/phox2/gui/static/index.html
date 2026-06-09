@@ -212,9 +212,15 @@
             </button>
 
             <!-- Water pump -->
-            <button @click="runWaterPump" :disabled="!manualActive" class="btn-action">
-              Run Water Pump (10 s)
-            </button>
+            <div class="col-span-2 flex gap-1 items-center">
+              <input type="number" v-model.number="manualPumpDuration" min="1" step="0.5"
+                     :disabled="!manualActive"
+                     class="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-center disabled:opacity-50" />
+              <span class="text-sm text-gray-400">s</span>
+              <button @click="runWaterPump" :disabled="!manualActive" class="btn-action flex-1">
+                Run Water Pump
+              </button>
+            </div>
 
             <!-- Dye pump -->
             <button @click="pulseDyePump" :disabled="!manualActive" class="btn-action">
@@ -628,7 +634,8 @@ createApp({
     const toggleShutter= () => { shutterOpen.value = !shutterOpen.value; send({ cmd: shutterOpen.value ? 'open_shutter'  : 'close_shutter' }); };
     const toggleStirrer= () => { stirrerOn.value   = !stirrerOn.value;   send({ cmd: stirrerOn.value   ? 'start_stirrer' : 'stop_stirrer'  }); };
 
-    const runWaterPump  = () => send({ cmd: 'run_water_pump', duration_s: 10.0 });
+    const manualPumpDuration = ref(1.0);
+    const runWaterPump  = () => send({ cmd: 'run_water_pump', duration_s: manualPumpDuration.value });
     const pulseDyePump  = () => send({ cmd: 'pulse_dye_pump', n_shots: 3 });
     const drainCuvette  = () => send({ cmd: 'drain_cuvette' });
     const autoAdjust    = () => send({ cmd: 'auto_adjust' });
@@ -641,6 +648,7 @@ createApp({
       if (c.interval_min    != null) configIntervalMin.value = Math.round(c.interval_min);
       if (c.integration_time_ms != null) configIntTimeMs.value = c.integration_time_ms;
       if (c.drain_mode      != null) configDrainMode.value   = c.drain_mode;
+      if (c.manual_pump_duration_s != null) manualPumpDuration.value = c.manual_pump_duration_s;
     };
 
     const saveConfig         = () => send({ cmd: 'save_config' });

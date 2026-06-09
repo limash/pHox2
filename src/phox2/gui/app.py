@@ -168,6 +168,9 @@ class InstrumentState:
         self._config_pump_time_s: float = float(
             OmegaConf.select(cfg, "measurement.pump_time_s", default=60.0)
         )
+        self._config_manual_pump_duration_s: float = float(
+            OmegaConf.select(cfg, "measurement.manual_pump_duration_s", default=1.0)
+        )
         self._config_drain_mode: str = (
             "ON" if OmegaConf.select(cfg, "measurement.drain_after", default=True) else "OFF"
         )
@@ -388,7 +391,7 @@ class InstrumentState:
 
             case "run_water_pump":
                 asyncio.create_task(
-                    api.run_water_pump(float(msg.get("duration_s", 10.0)))
+                    api.run_water_pump(float(msg.get("duration_s", self._config_manual_pump_duration_s)))
                 )
             case "pulse_dye_pump":
                 asyncio.create_task(api.pulse_dye_pump(int(msg.get("n_shots", 3))))
@@ -489,6 +492,7 @@ class InstrumentState:
             "dye": self._config_dye,
             "autoadjust_mode": self._config_autoadjust,
             "pump_time_s": self._config_pump_time_s,
+            "manual_pump_duration_s": self._config_manual_pump_duration_s,
             "interval_min": self.interval_s / 60.0,
             "integration_time_ms": self._config_integration_time_ms,
             "drain_mode": self._config_drain_mode,

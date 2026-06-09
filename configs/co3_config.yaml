@@ -74,6 +74,7 @@ measurement:
   mix_time_s: 10.0           # stirring time after dye injection
   wait_time_s: 5.0           # settling time after stirrer stops
   pump_time_s: 60.0          # sample flush duration before measurement
+  manual_pump_duration_s: 1.0  # default duration for the manual water pump button
   drain_after: true          # drain cuvette after each measurement
   drain_time_s: 60.0
   time_acceleration: 100     # divide all sleep durations; set >1 for fast mock runs
