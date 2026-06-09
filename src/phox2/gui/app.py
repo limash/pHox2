@@ -139,9 +139,7 @@ class InstrumentState:
         self._sensor_task: asyncio.Task | None = None
         self._spectrum_task: asyncio.Task | None = None
         self._countdown_task: asyncio.Task | None = None
-        self._test_udp_task: asyncio.Task | None = None
         self._next_measurement_at: float | None = None
-        self._test_udp_active: bool = False
 
         self.interval_s: float = float(
             OmegaConf.select(cfg, "continuous.interval_s", default=300.0)
@@ -212,7 +210,6 @@ class InstrumentState:
             self._sensor_task,
             self._spectrum_task,
             self._countdown_task,
-            self._test_udp_task,
         ):
             if task and not task.done():
                 task.cancel()
@@ -271,15 +268,6 @@ class InstrumentState:
                     {"type": "countdown", "seconds_remaining": int(remaining)}
                 )
             await asyncio.sleep(15)
-
-    async def _test_udp_loop(self) -> None:
-        counter = 0
-        while True:
-            counter += 1
-            await self._manager.broadcast(
-                {"type": "log_line", "text": f"[TEST UDP] broadcast #{counter}"}
-            )
-            await asyncio.sleep(10)
 
     # ── Measurement ───────────────────────────────────────────────────────
 
@@ -437,23 +425,6 @@ class InstrumentState:
                 else:
                     logger.warning("save_config: no config_path set")
 
-            case "toggle_test_udp":
-                if self._test_udp_active:
-                    self._test_udp_active = False
-                    if self._test_udp_task and not self._test_udp_task.done():
-                        self._test_udp_task.cancel()
-                    self._test_udp_task = None
-                    logger.info("Test UDP stopped")
-                else:
-                    self._test_udp_active = True
-                    self._test_udp_task = asyncio.create_task(
-                        self._test_udp_loop(), name="test_udp"
-                    )
-                    logger.info("Test UDP started")
-                await self._manager.broadcast(
-                    {"type": "config_update", "test_udp_active": self._test_udp_active}
-                )
-
             case "set_dye_type":
                 dye = str(msg.get("dye", ""))
                 if not dye:
@@ -521,7 +492,6 @@ class InstrumentState:
             "interval_min": self.interval_s / 60.0,
             "integration_time_ms": self._config_integration_time_ms,
             "drain_mode": self._config_drain_mode,
-            "test_udp_active": self._test_udp_active,
         }
 
     def state_snapshot(self) -> dict:

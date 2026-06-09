@@ -244,10 +244,6 @@
             <button @click="saveConfig" :disabled="!canEditConfig" class="btn-primary">
               Save Config
             </button>
-            <button @click="toggleTestUdp" :disabled="!canEditConfig"
-                    class="btn-toggle" :class="{ 'btn-active': testUdpActive }">
-              {{ testUdpActive ? 'Stop Test UDP' : 'Start Test UDP' }}
-            </button>
           </div>
 
           <!-- Configuration table -->
@@ -402,8 +398,6 @@ createApp({
     const configIntervalMin  = ref(5);
     const configIntTimeMs    = ref(18);
     const configDrainMode    = ref('ON');
-    const testUdpActive      = ref(false);
-
     // Chart.js instances (not reactive — plain JS objects)
     let spectrumChart = null;
     let resultChart   = null;
@@ -647,11 +641,9 @@ createApp({
       if (c.interval_min    != null) configIntervalMin.value = Math.round(c.interval_min);
       if (c.integration_time_ms != null) configIntTimeMs.value = c.integration_time_ms;
       if (c.drain_mode      != null) configDrainMode.value   = c.drain_mode;
-      if (c.test_udp_active != null) testUdpActive.value     = c.test_udp_active;
     };
 
     const saveConfig         = () => send({ cmd: 'save_config' });
-    const toggleTestUdp      = () => send({ cmd: 'toggle_test_udp' });
     const onDyeChange        = ()  => send({ cmd: 'set_dye_type', dye: configDye.value });
     const onAutoadjustChange = ()  => send({ cmd: 'set_autoadjust', mode: configAutoadjust.value });
     const onIntervalChange   = ()  => send({ cmd: 'set_sampling_interval', interval_min: configIntervalMin.value });
@@ -759,7 +751,7 @@ createApp({
       valveOpen, lightOn, shutterOpen, stirrerOn,
       logArea,
       configDye, configAutoadjust, configPumpTime, configIntervalMin,
-      configIntTimeMs, configDrainMode, testUdpActive,
+      configIntTimeMs, configDrainMode,
       // Computed
       isCo3, isMeasuring, isContinuous, isAdjusting,
       canStartSingle, canToggleContinuous, canToggleManual, canEditConfig,
@@ -770,7 +762,7 @@ createApp({
       startSingle, toggleContinuous, toggleManual,
       toggleValve, toggleLight, toggleShutter, toggleStirrer,
       runWaterPump, pulseDyePump, drainCuvette, autoAdjust,
-      saveConfig, toggleTestUdp,
+      saveConfig,
       onDyeChange, onAutoadjustChange, onIntervalChange, onIntTimeChange, onDrainModeChange,
     };
   },
