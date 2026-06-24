@@ -99,13 +99,28 @@ measurement:
   manual_pump_duration_s: 1.0  # default duration for the manual water pump button
   drain_after: true
   drain_time_s: 60.0
+  dye_level: 2000            # current dye reservoir level (0–2000; 1000 = one bag)
   time_acceleration: 100
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality control
+# ──────────────────────────────────────────────────────────────────────────────
+qc:
+  flow_threshold: 2000       # min blue-pixel rise (post-cycle vs last injection)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Autostart on launch
+# ──────────────────────────────────────────────────────────────────────────────
+autostart:
+  enabled: false               # start a measurement mode automatically on launch
+  mode: "pump"                 # pump | now | time (time is a no-op)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Ship / platform
 # ──────────────────────────────────────────────────────────────────────────────
 ship:
   code: "NB"
+  box_id: "pHox1"              # instrument identifier (title bar + log/UDP records)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Output

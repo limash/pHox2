@@ -34,9 +34,12 @@ class _FerryboxProtocol(asyncio.DatagramProtocol):
     JSON object of the form::
 
         {"type": "ferrybox_data", "salinity": 35.012, "temperature": 18.5,
+         "pumping": 1, "longitude": 10.71, "latitude": 59.91,
          "timestamp": "2026-05-19T12:00:00"}
 
-    Malformed packets are logged and silently discarded.
+    ``temperature``, ``pumping``, ``longitude`` and ``latitude`` are optional;
+    missing/malformed values are treated as ``None``.  Malformed packets are
+    logged and silently discarded.
     """
 
     def __init__(self, on_data: "asyncio.Future[None] | None" = None) -> None:
@@ -62,17 +65,21 @@ class _FerryboxProtocol(asyncio.DatagramProtocol):
             logger.warning("Ferrybox: missing/invalid salinity in packet from %s: %s", addr, exc)
             return
 
-        temperature: float | None = None
-        if "temperature" in payload:
+        def _opt(key: str, cast):
+            if key not in payload:
+                return None
             try:
-                temperature = float(payload["temperature"])
+                return cast(payload[key])
             except (TypeError, ValueError):
-                pass  # optional field — ignore if malformed
+                return None  # optional field — ignore if malformed
 
         fb_data = FerryboxData(
             salinity=salinity,
             timestamp=datetime.now(tz=timezone.utc),
-            temperature=temperature,
+            temperature=_opt("temperature", float),
+            pumping=_opt("pumping", int),
+            longitude=_opt("longitude", float),
+            latitude=_opt("latitude", float),
         )
         for cb in self._on_data_callbacks:
             cb(fb_data)

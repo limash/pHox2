@@ -62,6 +62,7 @@ co3:
   wavelength_2_nm: 250.0    # secondary peak         (A2)
   wavelength_3_nm: 350.0    # reference baseline     (A3)
   dye: "Pb_perchlor"        # Pb_perchlor | Pb_chlor
+  lamp_warmup_s: 180        # UV lamp warm-up before a measurement (s)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Measurement cycle
@@ -77,7 +78,14 @@ measurement:
   manual_pump_duration_s: 1.0  # default duration for the manual water pump button
   drain_after: true          # drain cuvette after each measurement
   drain_time_s: 60.0
+  dye_level: 2000            # current dye reservoir level (0–2000; 1000 = one bag)
   time_acceleration: 100     # divide all sleep durations; set >1 for fast mock runs
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality control
+# ──────────────────────────────────────────────────────────────────────────────
+qc:
+  flow_threshold: 2000       # min blue-pixel rise (post-cycle vs last injection)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Continuous mode
@@ -87,10 +95,18 @@ continuous:
   autostart: false             # start continuous mode automatically on launch
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Autostart on launch
+# ──────────────────────────────────────────────────────────────────────────────
+autostart:
+  enabled: false               # start a measurement mode automatically on launch
+  mode: "pump"                 # pump | now | time (time is a no-op)
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Ship / platform
 # ──────────────────────────────────────────────────────────────────────────────
 ship:
   code: "NB"
+  box_id: "CO3box1"            # instrument identifier (title bar + log/UDP records)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Output

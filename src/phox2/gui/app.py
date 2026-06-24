@@ -144,12 +144,44 @@ class InstrumentState:
         self.interval_s: float = float(
             OmegaConf.select(cfg, "continuous.interval_s", default=300.0)
         )
+        # Autostart: prefer the `autostart` section; fall back to the legacy
+        # `continuous.autostart` bool (→ start immediately).
         self._autostart: bool = bool(
-            OmegaConf.select(cfg, "continuous.autostart", default=False)
+            OmegaConf.select(cfg, "autostart.enabled", default=None)
+            if OmegaConf.select(cfg, "autostart.enabled", default=None) is not None
+            else OmegaConf.select(cfg, "continuous.autostart", default=False)
+        )
+        self._autostart_mode: str = str(
+            OmegaConf.select(cfg, "autostart.mode", default="now")
         )
         self.n_cycles: int = int(
             OmegaConf.select(cfg, "measurement.n_cycles", default=1)
         )
+        self._time_acceleration: float = max(
+            1.0, float(OmegaConf.select(cfg, "measurement.time_acceleration", default=1.0))
+        )
+        self._lamp_warmup_s: float = float(
+            OmegaConf.select(cfg, "co3.lamp_warmup_s", default=180.0)
+        )
+
+        # Dye-level tracking (0–2000; 1000 = one bag)
+        self._dye_level: float = float(
+            OmegaConf.select(cfg, "measurement.dye_level", default=2000)
+        )
+        self._dye_per_cycle: float = (
+            self.n_cycles
+            * float(OmegaConf.select(cfg, "measurement.dye_volume_per_shot_ml", default=0.03))
+            * int(OmegaConf.select(cfg, "measurement.dye_n_shots", default=1))
+        )
+        self.box_id: str = str(
+            OmegaConf.select(cfg, "ship.box_id", default=None)
+            or OmegaConf.select(cfg, "ship.code", default="phox")
+        )
+
+        # Calibration / test-UDP background tasks
+        self._calibration_task: asyncio.Task | None = None
+        self._stop_calibration: asyncio.Event = asyncio.Event()
+        self._test_udp_task: asyncio.Task | None = None
 
         int_time_ms = float(
             OmegaConf.select(cfg, "spectrometer.integration_time_ms", default=18.0)
@@ -198,13 +230,7 @@ class InstrumentState:
         self._spectrum_task = asyncio.create_task(self._spectrum_poll(), name="spectrum_poll")
 
         if self._autostart:
-            logger.info(
-                "Autostart: launching continuous measurements (interval=%.0fs)",
-                self.interval_s,
-            )
-            self._continuous_task = asyncio.create_task(
-                self._continuous_loop(), name="continuous"
-            )
+            asyncio.create_task(self._autostart_loop(), name="autostart")
 
     async def shutdown(self) -> None:
         logger.info("GUI: shutdown — cancelling background tasks…")
@@ -213,6 +239,8 @@ class InstrumentState:
             self._sensor_task,
             self._spectrum_task,
             self._countdown_task,
+            self._calibration_task,
+            self._test_udp_task,
         ):
             if task and not task.done():
                 task.cancel()
@@ -240,6 +268,7 @@ class InstrumentState:
                         "voltage": round(v, 4),
                         "fb_temp": fb.temperature if fb is not None else None,
                         "fb_sal": fb.salinity if fb is not None else None,
+                        "fb_pumping": fb.pumping if fb is not None else None,
                     }
                 )
             except Exception:
@@ -296,6 +325,18 @@ class InstrumentState:
             self._storage.save(result)
             self.last_result = _serialize_result(result, self.instrument_type)
             await self._manager.broadcast({"type": "measurement_result", **self.last_result})
+            await self._manager.broadcast(
+                {
+                    "type": "qc_update",
+                    "qc_flow": result.qc_flow,
+                    "qc_dye": result.qc_dye,
+                    "qc_biofouling": result.qc_biofouling,
+                    "qc_temp_sensor": result.qc_temp_sensor,
+                    "qc_udp": result.qc_udp,
+                    "qc_overall": result.qc_overall,
+                }
+            )
+            await self._deduct_dye()
             logger.info(
                 "Measurement #%d complete: %s", self.measurement_n, result.summary()
             )
@@ -313,10 +354,16 @@ class InstrumentState:
         self._countdown_task = asyncio.create_task(
             self._countdown_loop(), name="countdown"
         )
+        await self._lamp_on()  # CO3: pre-warm the UV lamp; no-op for pH
 
         try:
             first = True
             while not self._stop_continuous.is_set():
+                # Pause while the Ferrybox pump is off (ship in port).
+                await self._maybe_pause()
+                if self._stop_continuous.is_set():
+                    break
+
                 self.measurement_n += 1
                 await self._run_measurement(flush_before=not first)
                 first = False
@@ -338,9 +385,189 @@ class InstrumentState:
         finally:
             self._next_measurement_at = None
             self.modes.discard("Continuous")
+            self.modes.discard("Paused")
+            await self._lamp_off()
             if self._countdown_task and not self._countdown_task.done():
                 self._countdown_task.cancel()
             await self._broadcast_mode()
+
+    async def _maybe_pause(self) -> None:
+        """Block while the Ferrybox pump is off; resume when it returns."""
+        assert self._api is not None
+        fb = self._api.get_ferrybox_data()
+        if (fb.pumping if fb is not None else None) != 0:
+            return  # pump on, or unknown (no Ferrybox) → proceed
+        logger.info("Continuous mode paused — Ferrybox pump is off")
+        self.modes.add("Paused")
+        await self._broadcast_mode()
+        try:
+            while not self._stop_continuous.is_set():
+                try:
+                    await asyncio.wait_for(self._stop_continuous.wait(), timeout=10.0)
+                    return  # stopped while paused
+                except asyncio.TimeoutError:
+                    fb = self._api.get_ferrybox_data()
+                    if (fb.pumping if fb is not None else None) != 0:
+                        break  # pump back on
+        finally:
+            self.modes.discard("Paused")
+            await self._broadcast_mode()
+
+    # ── Autostart ─────────────────────────────────────────────────────────
+
+    async def _autostart_loop(self) -> None:
+        """Start continuous mode according to the autostart mode."""
+        mode = self._autostart_mode
+        logger.info("Autostart: mode=%s", mode)
+        if mode == "time":
+            logger.warning("Autostart mode 'time' is not implemented; ignoring")
+            return
+        if mode == "pump":
+            # Poll until the Ferrybox pump is on, then start.
+            assert self._api is not None
+            while True:
+                fb = self._api.get_ferrybox_data()
+                if (fb.pumping if fb is not None else None) == 1:
+                    break
+                await asyncio.sleep(1.0)
+        self._continuous_task = asyncio.create_task(
+            self._continuous_loop(), name="continuous"
+        )
+
+    # ── CO3 lamp warm-up ────────────────────────────────────────────────────
+
+    async def _lamp_on(self) -> None:
+        """Turn the UV lamp on, open the shutter, and wait for warm-up (CO3 only)."""
+        if self.instrument_type != "co3" or self._api is None:
+            return
+        try:
+            self._api.turn_on_light()      # type: ignore[union-attr]
+            self._api.open_shutter()       # type: ignore[union-attr]
+            await self._manager.broadcast(
+                {"type": "log_line", "text": "Wait for the lamp warming"}
+            )
+            await asyncio.sleep(self._lamp_warmup_s / self._time_acceleration)
+        except Exception:
+            logger.debug("Lamp warm-up failed", exc_info=True)
+
+    async def _lamp_off(self) -> None:
+        """Turn the UV lamp off and close the shutter (CO3 only)."""
+        if self.instrument_type != "co3" or self._api is None:
+            return
+        try:
+            self._api.turn_off_light()     # type: ignore[union-attr]
+            self._api.close_shutter()      # type: ignore[union-attr]
+        except Exception:
+            logger.debug("Lamp off failed", exc_info=True)
+
+    # ── Dye level ────────────────────────────────────────────────────────────
+
+    async def _deduct_dye(self) -> None:
+        self._dye_level = max(0.0, self._dye_level - self._dye_per_cycle)
+        OmegaConf.update(self._cfg, "measurement.dye_level", self._dye_level)
+        await self._broadcast_dye_level()
+
+    async def _broadcast_dye_level(self) -> None:
+        await self._manager.broadcast(
+            {"type": "dye_level", "value": round(self._dye_level)}
+        )
+
+    # ── pH calibration workflow ──────────────────────────────────────────────
+
+    async def _run_calibration(self, with_cleaning: bool, batch_number: int) -> None:
+        """
+        Run the Tris-buffer calibration check.
+
+        Three measurement steps before cleaning and, optionally, three after.
+        Each step's measured pH is compared against the theoretical Tris-buffer
+        pH; the step passes if ``|ΔpH| < calibration_threshold``.  The overall
+        result is a pass if the majority of the last three steps pass.
+        """
+        assert self._api is not None
+        api = self._api
+        tris_s = float(OmegaConf.select(self._cfg, "tris_buffer.salinity", default=35.0))
+        threshold = float(
+            OmegaConf.select(self._cfg, "tris_buffer.calibration_threshold", default=0.005)
+        )
+        cal_pump_s = float(OmegaConf.select(self._cfg, "tris_buffer.pump_time_s", default=30.0))
+        first_pump_s = self._config_pump_time_s
+
+        n_steps = 6 if with_cleaning else 3
+        self._stop_calibration.clear()
+        self.modes.add("Calibration")
+        await self._broadcast_mode()
+
+        steps: list[dict] = [{"index": i, "passed": None} for i in range(n_steps)]
+        last_date = ""
+        try:
+            for i in range(n_steps):
+                if self._stop_calibration.is_set():
+                    break
+                # Cleaning boundary prompt (frontend shows a dialog).
+                if with_cleaning and i == 3:
+                    await self._manager.broadcast(
+                        {
+                            "type": "calibration_update",
+                            "steps": steps,
+                            "cleaning_prompt": True,
+                            "batch_number": batch_number,
+                        }
+                    )
+                pump_s = first_pump_s if i in (0, 3) else cal_pump_s
+                await api.run_water_pump(pump_s / self._time_acceleration)
+                result = await api.run_single_measurement(
+                    flush_before=False, salinity=tris_s
+                )
+                theo = api.theoretical_tris_ph(result.t_cuvette, tris_s)  # type: ignore[union-attr]
+                passed = bool(abs(result.pH_cuvette - theo) < threshold)
+                steps[i] = {
+                    "index": i,
+                    "passed": passed,
+                    "measured": result.pH_cuvette,
+                    "theoretical": round(theo, 4),
+                }
+                last_date = result.timestamp.strftime("%Y-%m-%d %H:%M")
+                await self._manager.broadcast(
+                    {
+                        "type": "calibration_update",
+                        "steps": steps,
+                        "batch_number": batch_number,
+                    }
+                )
+
+            last3 = [s["passed"] for s in steps[-3:] if s["passed"] is not None]
+            if not last3:
+                overall = 0  # no result
+            else:
+                overall = 2 if sum(bool(p) for p in last3) > len(last3) / 2 else 1
+            await self._manager.broadcast(
+                {
+                    "type": "calibration_update",
+                    "steps": steps,
+                    "result": overall,
+                    "date": last_date,
+                    "batch_number": batch_number,
+                }
+            )
+        except Exception:
+            logger.exception("Calibration failed")
+        finally:
+            self.modes.discard("Calibration")
+            await self._broadcast_mode()
+
+    # ── Test-UDP broadcast ───────────────────────────────────────────────────
+
+    async def _test_udp_loop(self) -> None:
+        """Broadcast a placeholder test data string every 10 s while enabled."""
+        try:
+            while True:
+                payload = f"$P{self.instrument_type.upper()},test,{self.box_id},-998"
+                await self._manager.broadcast(
+                    {"type": "log_line", "text": f"Test UDP: {payload}"}
+                )
+                await asyncio.sleep(10.0)
+        except asyncio.CancelledError:
+            pass
 
     # ── Command dispatcher ────────────────────────────────────────────────
 
@@ -471,6 +698,58 @@ class InstrumentState:
                 )
                 await self._broadcast_config()
 
+            # ── LED manual controls (pH only) ─────────────────────────
+            case "turn_on_leds":
+                if hasattr(api, "turn_on_leds"):
+                    api.turn_on_leds()
+            case "turn_off_leds":
+                if hasattr(api, "turn_off_leds"):
+                    api.turn_off_leds()
+            case "set_led_duty_cycle":
+                if hasattr(api, "set_led_duty_cycle"):
+                    api.set_led_duty_cycle(
+                        int(msg.get("channel", 0)), int(msg.get("duty", 0))
+                    )
+
+            # ── Dye level ─────────────────────────────────────────────
+            case "refill_dye":
+                if self._dye_level < 1000:
+                    self._dye_level = 1000.0
+                elif self._dye_level < 2000:
+                    self._dye_level = 2000.0
+                OmegaConf.update(self._cfg, "measurement.dye_level", self._dye_level)
+                await self._broadcast_dye_level()
+            case "clear_dye":
+                self._dye_level = 0.0
+                OmegaConf.update(self._cfg, "measurement.dye_level", self._dye_level)
+                await self._broadcast_dye_level()
+
+            # ── pH calibration ────────────────────────────────────────
+            case "start_calibration":
+                if self.instrument_type != "ph":
+                    return
+                if "Calibration" in self.modes or "Measuring" in self.modes:
+                    return
+                with_cleaning = bool(msg.get("with_cleaning", False))
+                batch_number = int(msg.get("batch_number", 0))
+                self._calibration_task = asyncio.create_task(
+                    self._run_calibration(with_cleaning, batch_number),
+                    name="calibration",
+                )
+            case "stop_calibration":
+                self._stop_calibration.set()
+
+            # ── Test-UDP broadcast toggle ─────────────────────────────
+            case "test_udp":
+                enabled = bool(msg.get("enabled", False))
+                if enabled and self._test_udp_task is None:
+                    self._test_udp_task = asyncio.create_task(
+                        self._test_udp_loop(), name="test_udp"
+                    )
+                elif not enabled and self._test_udp_task is not None:
+                    self._test_udp_task.cancel()
+                    self._test_udp_task = None
+
     # ── Helpers ───────────────────────────────────────────────────────────
 
     async def _broadcast_mode(self) -> None:
@@ -488,6 +767,10 @@ class InstrumentState:
         )
 
     def _config_dict(self) -> dict:
+        led_duties: list = []
+        if self.instrument_type == "ph":
+            raw = OmegaConf.select(self._cfg, "ph.led_duties", default=[55, 55, 55, 0])
+            led_duties = list(raw)[:3] if raw else [55, 55, 55]
         return {
             "dye": self._config_dye,
             "autoadjust_mode": self._config_autoadjust,
@@ -496,18 +779,25 @@ class InstrumentState:
             "interval_min": self.interval_s / 60.0,
             "integration_time_ms": self._config_integration_time_ms,
             "drain_mode": self._config_drain_mode,
+            "light_threshold": float(OmegaConf.select(self._cfg, "spectrometer.light_threshold_counts", default=60000.0)),
+            "led_duties": led_duties,
+            "wl1_nm": float(OmegaConf.select(self._cfg, "ph.wavelength_1_nm", default=434.0)),
+            "wl2_nm": float(OmegaConf.select(self._cfg, "ph.wavelength_2_nm", default=578.0)),
+            "nir_nm": float(OmegaConf.select(self._cfg, "ph.nir_nm", default=730.0)),
         }
 
     def state_snapshot(self) -> dict:
         return {
             "type": "state_snapshot",
             "instrument_type": self.instrument_type,
+            "box_id": self.box_id,
             "modes": list(self.modes),
             "measurement_n": self.measurement_n,
             "last_result": self.last_result,
             "wavelengths": self.wavelengths,
             "n_cycles": self.n_cycles,
             "interval_s": self.interval_s,
+            "dye_level": round(self._dye_level),
             "config": self._config_dict(),
         }
 
@@ -543,6 +833,12 @@ def _serialize_result(
             "a3": result.a3,
             "fb_temp": result.fb_temp,
             "fb_sal": result.fb_sal,
+            "qc_flow": result.qc_flow,
+            "qc_dye": result.qc_dye,
+            "qc_biofouling": result.qc_biofouling,
+            "qc_temp_sensor": result.qc_temp_sensor,
+            "qc_udp": result.qc_udp,
+            "qc_overall": result.qc_overall,
             "absorption_wavelengths": wl[mask].tolist(),
             "absorption_spectra": absorption_spectra,
         }
@@ -553,11 +849,22 @@ def _serialize_result(
         "pH_cuvette": result.pH_cuvette,
         "pH_insitu": result.pH_insitu,
         "r_square": result.r_square,
+        "slope": result.slope,
         "t_cuvette": result.t_cuvette,
         "salinity_corrected": result.salinity_corrected,
         "r_ratio": result.r_ratio,
         "fb_temp": result.fb_temp,
         "fb_sal": result.fb_sal,
+        "qc_flow": result.qc_flow,
+        "qc_dye": result.qc_dye,
+        "qc_biofouling": result.qc_biofouling,
+        "qc_temp_sensor": result.qc_temp_sensor,
+        "qc_udp": result.qc_udp,
+        "qc_overall": result.qc_overall,
+        "injections_scatter": [
+            {"vol_ml": float(inj.vol_injected_ml), "pH": float(inj.pH)}
+            for inj in result.injections
+        ],
     }
 
 
@@ -576,7 +883,9 @@ def _load_history(instrument_type: str, base_path: str) -> list[dict]:
         return []
 
     try:
-        df = pd.read_csv(log_file).tail(_HISTORY_ROWS)
+        # Tolerate legacy rows written before the column format changed
+        # (a deployed instrument's log can mix old- and new-width rows).
+        df = pd.read_csv(log_file, on_bad_lines="skip").tail(_HISTORY_ROWS)
         points: list[dict] = []
         for _, row in df.iterrows():
             point: dict = {

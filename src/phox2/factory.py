@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from phox2.components.drain import AirPressureDrain
 from phox2.components.light import PWMLEDArray, RelayLightSource, RelayShutter
@@ -161,6 +161,8 @@ class InstrumentFactory:
             adj_cfg=SpectrometerAdjustConfig.from_omegaconf(cfg.spectrometer.autoadjust),
             integration_time_ms=float(cfg.spectrometer.integration_time_ms),
             ship_code=str(cfg.ship.code),
+            box_id=cls._box_id(cfg),
+            flow_threshold=float(OmegaConf.select(cfg, "qc.flow_threshold", default=2000.0)),
         )
 
     @classmethod
@@ -218,7 +220,14 @@ class InstrumentFactory:
             adj_cfg=SpectrometerAdjustConfig.from_omegaconf(cfg.spectrometer.autoadjust),
             integration_time_ms=float(cfg.spectrometer.integration_time_ms),
             ship_code=str(cfg.ship.code),
+            box_id=cls._box_id(cfg),
+            flow_threshold=float(OmegaConf.select(cfg, "qc.flow_threshold", default=2000.0)),
         )
+
+    @staticmethod
+    def _box_id(cfg: DictConfig) -> str:
+        """Instrument box id, falling back to the ship code when unset."""
+        return str(OmegaConf.select(cfg, "ship.box_id", default=None) or cfg.ship.code)
 
     # ── Ferrybox communication ────────────────────────────────────────────
 

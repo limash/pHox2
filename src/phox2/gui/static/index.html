@@ -20,23 +20,18 @@
                border border-gray-600
                disabled:opacity-40 disabled:cursor-not-allowed;
       }
-      .btn-active {
-        @apply !bg-blue-700 !border-blue-500;
-      }
-      .btn-warn-active {
-        @apply !bg-amber-700 !border-amber-500;
-      }
+      .btn-active   { @apply !bg-blue-700 !border-blue-500; }
+      .btn-warn-active { @apply !bg-amber-700 !border-amber-500; }
       .btn-action {
         @apply w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 active:bg-gray-500
                text-white rounded text-sm font-medium transition-colors
                border border-gray-600 text-center
                disabled:opacity-40 disabled:cursor-not-allowed;
       }
-      .card {
-        @apply bg-gray-800 rounded-lg p-3;
-      }
-      .card-title {
-        @apply text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2;
+      .card       { @apply bg-gray-800 rounded-lg p-3; }
+      .card-title { @apply text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2; }
+      .sel {
+        @apply w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm disabled:opacity-40;
       }
     }
   </style>
@@ -45,13 +40,11 @@
 
 <div id="app" class="flex flex-col h-screen">
 
-  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
   <header class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
     <div class="flex items-center gap-3">
       <h1 class="text-base font-bold tracking-tight">{{ instrumentTitle }}</h1>
-      <span v-if="measurementN > 0" class="text-xs text-gray-500 font-mono">
-        #{{ measurementN }}
-      </span>
+      <span v-if="measurementN > 0" class="text-xs text-gray-500 font-mono">#{{ measurementN }}</span>
     </div>
     <div class="flex items-center gap-2">
       <span class="w-2 h-2 rounded-full transition-colors"
@@ -60,7 +53,7 @@
     </div>
   </header>
 
-  <!-- ── Main: left plots | right tabs ───────────────────────────── -->
+  <!-- ── Main ────────────────────────────────────────────────────────────── -->
   <div class="flex flex-1 min-h-0">
 
     <!-- Left: plots (40%) -->
@@ -94,18 +87,16 @@
         </button>
       </div>
 
-      <!-- Tab content (v-show keeps all content in DOM) -->
+      <!-- Tab content -->
       <div class="flex-1 overflow-y-auto p-3 space-y-3">
 
-        <!-- ════════ HOME TAB ════════ -->
+        <!-- ════════ HOME ════════ -->
         <template v-if="activeTab === 'home'">
 
-          <!-- Status banner -->
           <div class="px-3 py-2 rounded text-sm font-medium" :class="statusBarClass">
             {{ statusText }}
           </div>
 
-          <!-- Controls row -->
           <div class="flex flex-wrap items-center gap-2">
             <button @click="startSingle" :disabled="!canStartSingle" class="btn-primary">
               Single Measurement
@@ -116,36 +107,28 @@
             </button>
           </div>
 
-          <!-- Two-column grid: progress+result | sensors -->
           <div class="grid grid-cols-2 gap-3">
 
-            <!-- Left column -->
+            <!-- Progress + last result -->
             <div class="space-y-3">
-
-              <!-- Measuring progress -->
               <div class="card">
                 <div class="card-title">Measuring Progress</div>
                 <div v-for="step in progressSteps" :key="step.key"
                      class="flex items-center gap-2 py-1">
-                  <span class="w-4 h-4 rounded flex items-center justify-center
-                               text-xs border shrink-0 transition-colors"
+                  <span class="w-4 h-4 rounded flex items-center justify-center text-xs border shrink-0 transition-colors"
                         :class="stepsCompleted.has(step.key)
                           ? 'bg-green-500 border-green-500 text-white'
                           : 'border-gray-600 text-transparent'">✓</span>
                   <span class="text-sm transition-colors"
-                        :class="stepsCompleted.has(step.key)
-                          ? 'text-green-300' : 'text-gray-500'">
+                        :class="stepsCompleted.has(step.key) ? 'text-green-300' : 'text-gray-500'">
                     {{ step.label }}
                   </span>
                 </div>
               </div>
 
-              <!-- Last measurement result -->
               <div class="card">
                 <div class="card-title">Last Measurement</div>
-                <div v-if="!lastResult" class="text-sm text-gray-500 py-1">
-                  No results yet
-                </div>
+                <div v-if="!lastResult" class="text-sm text-gray-500 py-1">No results yet</div>
                 <table v-else class="w-full text-sm">
                   <tr v-for="row in lastResultRows" :key="row.label"
                       class="border-b border-gray-700 last:border-0">
@@ -156,64 +139,63 @@
               </div>
             </div>
 
-            <!-- Right column: live sensors -->
-            <div class="card">
-              <div class="card-title">Live Sensors</div>
-              <div class="space-y-2.5">
-                <div v-for="sensor in sensorRows" :key="sensor.label"
-                     class="flex justify-between items-baseline gap-2">
-                  <span class="text-sm text-gray-400">{{ sensor.label }}</span>
-                  <span class="font-mono text-sm text-white">{{ sensor.value }}</span>
+            <!-- Live sensors -->
+            <div class="space-y-3">
+              <div class="card">
+                <div class="card-title">Live Sensors</div>
+                <div class="space-y-2">
+                  <div v-for="s in sensorRows" :key="s.label"
+                       class="flex justify-between items-baseline gap-2">
+                    <span class="text-sm text-gray-400">{{ s.label }}</span>
+                    <span class="font-mono text-sm text-white">{{ s.value }}</span>
+                  </div>
+                  <!-- Ferrybox pump indicator -->
+                  <div class="flex justify-between items-baseline gap-2 pt-1 border-t border-gray-700">
+                    <span class="text-sm text-gray-400">Ferrybox pump</span>
+                    <span class="text-sm font-medium" :class="fbPumpingClass">{{ fbPumpingText }}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-          </div><!-- /grid -->
+          </div>
         </template><!-- /home -->
 
-        <!-- ════════ MANUAL TAB ════════ -->
+        <!-- ════════ MANUAL ════════ -->
         <template v-if="activeTab === 'manual'">
 
-          <!-- Manual mode toggle -->
           <button @click="toggleManual" :disabled="!canToggleManual"
-                  class="btn-toggle w-full justify-center py-3"
+                  class="btn-toggle w-full py-3"
                   :class="{ 'btn-warn-active': manualActive }">
             {{ manualActive ? '⚠  Manual Control Active — Click to Disable' : 'Enable Manual Control' }}
           </button>
-          <p class="text-xs text-gray-500 text-center -mt-1">
-            Manual control is disabled while measuring or adjusting
-          </p>
+          <p class="text-xs text-gray-500 text-center -mt-1">Disabled while measuring or adjusting</p>
 
           <!-- Hardware buttons -->
           <div class="grid grid-cols-2 gap-2">
 
-            <!-- Valve toggle -->
             <button @click="toggleValve" :disabled="!manualActive" class="btn-action"
                     :class="{ 'btn-active': valveOpen }">
               {{ valveOpen ? 'Close Inlet Valve' : 'Open Inlet Valve' }}
             </button>
 
-            <!-- Light toggle -->
             <button @click="toggleLight" :disabled="!manualActive" class="btn-action"
                     :class="{ 'btn-active': lightOn }">
               {{ lightOn ? 'Turn Off Light' : 'Turn On Light' }}
             </button>
 
-            <!-- Shutter (CO3 only) -->
             <button v-if="isCo3" @click="toggleShutter" :disabled="!manualActive"
                     class="btn-action" :class="{ 'btn-active': shutterOpen }">
               {{ shutterOpen ? 'Close Shutter' : 'Open Shutter' }}
             </button>
 
-            <!-- Stirrer toggle -->
             <button @click="toggleStirrer" :disabled="!manualActive" class="btn-action"
                     :class="{ 'btn-active': stirrerOn }">
               {{ stirrerOn ? 'Stop Stirrer' : 'Start Stirrer' }}
             </button>
 
-            <!-- Water pump -->
             <div class="col-span-2 flex gap-1 items-center">
-              <input type="number" v-model.number="manualPumpDuration" min="1" step="0.5"
+              <input type="number" v-model.number="manualPumpDuration" min="0.5" step="0.5"
                      :disabled="!manualActive"
                      class="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-center disabled:opacity-50" />
               <span class="text-sm text-gray-400">s</span>
@@ -222,49 +204,73 @@
               </button>
             </div>
 
-            <!-- Dye pump -->
             <button @click="pulseDyePump" :disabled="!manualActive" class="btn-action">
               Dye Pump (3 shots)
             </button>
 
-            <!-- Drain (CO3 only) -->
-            <button v-if="isCo3" @click="drainCuvette" :disabled="!manualActive"
-                    class="btn-action">
+            <button v-if="isCo3" @click="drainCuvette" :disabled="!manualActive" class="btn-action">
               Drain Cuvette
             </button>
 
-            <!-- Auto-adjust -->
             <button @click="autoAdjust" :disabled="!manualActive || isAdjusting"
-                    class="btn-action">
+                    class="btn-action" :class="{ 'col-span-2': !isCo3 }">
               {{ isAdjusting ? 'Adjusting…' : 'Auto-Adjust Light' }}
             </button>
 
           </div>
+
+          <!-- LED controls (pH only) -->
+          <div v-if="!isCo3" class="card">
+            <div class="card-title">LED Values</div>
+            <div v-for="(ch, i) in ledChannels" :key="i" class="flex items-center gap-2 mb-3 last:mb-0">
+              <span class="w-28 text-xs text-gray-400 shrink-0">{{ ch }}</span>
+              <input type="range" min="0" max="100"
+                     :value="ledDuties[i]"
+                     @input="onLedChange(i, +$event.target.value)"
+                     :disabled="!manualActive"
+                     class="flex-1 accent-blue-500 disabled:opacity-40 cursor-pointer" />
+              <input type="number" min="0" max="100"
+                     :value="ledDuties[i]"
+                     @change="onLedChange(i, +$event.target.value)"
+                     :disabled="!manualActive"
+                     class="w-14 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-center disabled:opacity-40" />
+              <button @click="onLedChange(i, ledDuties[i] - 1)" :disabled="!manualActive"
+                      class="btn-toggle px-2 py-1 text-xs">−</button>
+              <button @click="onLedChange(i, ledDuties[i] + 1)" :disabled="!manualActive"
+                      class="btn-toggle px-2 py-1 text-xs">+</button>
+            </div>
+          </div>
+
+          <!-- CO3: placeholder group (disabled) -->
+          <div v-if="isCo3" class="card opacity-40">
+            <div class="card-title">LED Values</div>
+            <p class="text-xs text-gray-500">CO₃ uses UV lamp only — no LED control</p>
+          </div>
+
         </template><!-- /manual -->
 
-        <!-- ════════ CONFIG TAB ════════ -->
+        <!-- ════════ CONFIG ════════ -->
         <template v-if="activeTab === 'config'">
 
-          <!-- Action buttons -->
           <div class="flex gap-2">
             <button @click="saveConfig" :disabled="!canEditConfig" class="btn-primary">
               Save Config
             </button>
+            <button @click="toggleTestUdp" :disabled="!canEditConfig"
+                    class="btn-toggle" :class="{ 'btn-active': testUdpEnabled }">
+              {{ testUdpEnabled ? 'Stop Test UDP' : 'Test UDP' }}
+            </button>
           </div>
 
-          <!-- Configuration table -->
           <div class="card">
             <div class="card-title">Configuration</div>
             <table class="w-full text-sm">
 
-              <!-- DYE type -->
               <tr class="border-b border-gray-700">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap w-1/2">DYE type</td>
                 <td class="py-2">
                   <select v-model="configDye" @change="onDyeChange" @wheel.prevent
-                          :disabled="!canEditConfig"
-                          class="w-full bg-gray-700 border border-gray-600 rounded
-                                 px-2 py-1 text-sm disabled:opacity-40">
+                          :disabled="!canEditConfig" class="sel">
                     <template v-if="isCo3">
                       <option value="Pb_perchlor">Pb_perchlor</option>
                     </template>
@@ -276,14 +282,11 @@
                 </td>
               </tr>
 
-              <!-- Autoadjust state -->
               <tr class="border-b border-gray-700">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Autoadjust state</td>
                 <td class="py-2">
                   <select v-model="configAutoadjust" @change="onAutoadjustChange" @wheel.prevent
-                          :disabled="!canEditConfig"
-                          class="w-full bg-gray-700 border border-gray-600 rounded
-                                 px-2 py-1 text-sm disabled:opacity-40">
+                          :disabled="!canEditConfig" class="sel">
                     <option value="ON">ON</option>
                     <option value="OFF">OFF</option>
                     <option value="ON_NORED">ON_NORED</option>
@@ -291,46 +294,36 @@
                 </td>
               </tr>
 
-              <!-- Pumping time (read-only) -->
               <tr class="border-b border-gray-700">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Pumping time (s)</td>
                 <td class="py-2 font-mono text-white">{{ configPumpTime }}</td>
               </tr>
 
-              <!-- Sampling interval -->
               <tr class="border-b border-gray-700">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Sampling interval (min)</td>
                 <td class="py-2">
                   <select v-model.number="configIntervalMin" @change="onIntervalChange" @wheel.prevent
-                          :disabled="!canEditConfig || isContinuous"
-                          class="w-full bg-gray-700 border border-gray-600 rounded
-                                 px-2 py-1 text-sm disabled:opacity-40">
+                          :disabled="!canEditConfig || isContinuous" class="sel">
                     <option v-for="m in [5,7,10,15,20,30,60]" :key="m" :value="m">{{ m }}</option>
                   </select>
                 </td>
               </tr>
 
-              <!-- Spectrometer integration time -->
               <tr class="border-b border-gray-700">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Spectro integration time (ms)</td>
                 <td class="py-2">
                   <select v-model.number="configIntTimeMs" @change="onIntTimeChange" @wheel.prevent
-                          :disabled="!canEditConfig"
-                          class="w-full bg-gray-700 border border-gray-600 rounded
-                                 px-2 py-1 text-sm disabled:opacity-40">
+                          :disabled="!canEditConfig" class="sel">
                     <option v-for="t in intTimeOptions" :key="t" :value="t">{{ t }}</option>
                   </select>
                 </td>
               </tr>
 
-              <!-- Drain mode (CO3 only) -->
               <tr v-if="isCo3">
                 <td class="py-2 pr-4 text-gray-400 whitespace-nowrap">Drain mode</td>
                 <td class="py-2">
                   <select v-model="configDrainMode" @change="onDrainModeChange" @wheel.prevent
-                          :disabled="!canEditConfig"
-                          class="w-full bg-gray-700 border border-gray-600 rounded
-                                 px-2 py-1 text-sm disabled:opacity-40">
+                          :disabled="!canEditConfig" class="sel">
                     <option value="ON">ON</option>
                     <option value="OFF">OFF</option>
                   </select>
@@ -342,7 +335,95 @@
 
         </template><!-- /config -->
 
-        <!-- ════════ LOG TAB ════════ -->
+        <!-- ════════ STATUS ════════ -->
+        <template v-if="activeTab === 'status'">
+
+          <!-- Dye level -->
+          <div class="card">
+            <div class="card-title">Dye Level</div>
+            <div class="flex items-center gap-3 mb-3">
+              <div class="flex-1 bg-gray-700 rounded-full h-5 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-300"
+                     :style="`width: ${Math.min(100, (dyeLevel / 2000) * 100)}%`"
+                     :class="dyeLevel > 1000 ? 'bg-green-500' : dyeLevel > 400 ? 'bg-yellow-500' : 'bg-red-500'">
+                </div>
+              </div>
+              <span class="text-sm font-mono text-white w-24 shrink-0 text-right">
+                {{ dyeLevel }} / 2000
+              </span>
+            </div>
+            <div class="flex gap-2">
+              <button @click="refillDye" class="btn-primary text-xs py-1.5 px-3">
+                +1 bag Refilled
+              </button>
+              <button @click="clearDye" class="btn-toggle text-xs py-1.5 px-3">
+                Clear All
+              </button>
+            </div>
+          </div>
+
+          <!-- QC flags -->
+          <div class="card">
+            <div class="card-title">Last Measurement QC</div>
+            <div v-for="flag in qcFlagRows" :key="flag.key"
+                 class="flex items-center gap-3 py-1.5 border-b border-gray-700 last:border-0">
+              <span class="w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                    :class="qcClass(qcFlags[flag.key])">
+                {{ qcIcon(qcFlags[flag.key]) }}
+              </span>
+              <span class="text-sm">{{ flag.label }}</span>
+              <span class="ml-auto text-xs text-gray-500">
+                {{ qcFlags[flag.key] === null ? 'not evaluated' : qcFlags[flag.key] ? 'PASS' : 'FAIL' }}
+              </span>
+            </div>
+            <!-- Overall -->
+            <div class="flex items-center gap-3 pt-2 mt-1">
+              <span class="w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                    :class="qcClass(qcFlags.overall)">
+                {{ qcIcon(qcFlags.overall) }}
+              </span>
+              <span class="text-sm font-semibold">Overall</span>
+              <span class="ml-auto text-xs font-semibold"
+                    :class="qcFlags.overall === null ? 'text-gray-500' : qcFlags.overall ? 'text-green-400' : 'text-red-400'">
+                {{ qcFlags.overall === null ? '—' : qcFlags.overall ? 'PASS' : 'FAIL' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- pH calibration group -->
+          <div v-if="!isCo3" class="card">
+            <div class="card-title">Calibration (Tris Buffer)</div>
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <div class="text-sm font-semibold" :class="calResultClass">{{ calResultText }}</div>
+                <div v-if="calDate" class="text-xs text-gray-500 mt-0.5">{{ calDate }}</div>
+              </div>
+              <button @click="openCalModal"
+                      :disabled="!canStartCalibration"
+                      class="btn-primary text-xs py-1.5 px-3"
+                      :class="{ 'btn-active': isCalibration }">
+                {{ isCalibration ? 'Calibration Running…' : 'Make Calibration Check' }}
+              </button>
+            </div>
+            <!-- Progress preview when calibration running -->
+            <div v-if="isCalibration && calSteps.length > 0" class="space-y-1">
+              <div v-for="step in calSteps" :key="step.index"
+                   class="flex items-center gap-2 text-xs">
+                <span class="w-4 h-4 rounded flex items-center justify-center font-bold shrink-0"
+                      :class="step.passed === null ? 'bg-gray-700 text-gray-400' : step.passed ? 'bg-green-600 text-white' : 'bg-red-600 text-white'">
+                  {{ step.passed === null ? String(step.index + 1) : step.passed ? '✓' : '✗' }}
+                </span>
+                <span class="text-gray-400">Step {{ step.index + 1 }}</span>
+                <span v-if="step.measured != null" class="font-mono text-gray-300 ml-auto">
+                  {{ step.measured.toFixed(4) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </template><!-- /status -->
+
+        <!-- ════════ LOG ════════ -->
         <template v-if="activeTab === 'log'">
           <div class="flex justify-between items-center">
             <span class="text-xs text-gray-500">{{ logLines.length }} lines</span>
@@ -352,8 +433,8 @@
             </button>
           </div>
           <textarea ref="logArea" readonly
-                    class="w-full font-mono text-xs bg-gray-800 text-gray-300 rounded
-                           p-2 resize-none border border-gray-700 focus:outline-none"
+                    class="w-full font-mono text-xs bg-gray-800 text-gray-300 rounded p-2
+                           resize-none border border-gray-700 focus:outline-none"
                     style="height: calc(100vh - 14rem)"
                     :value="logLines.join('\n')"></textarea>
         </template><!-- /log -->
@@ -361,6 +442,132 @@
       </div><!-- /tab content -->
     </div><!-- /right panel -->
   </div><!-- /main -->
+
+  <!-- ── Single measurement confirm dialog ──────────────────────────────── -->
+  <div v-if="showSingleConfirm"
+       class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center"
+       @click.self="cancelSingle">
+    <div class="bg-gray-800 border border-gray-600 rounded-xl p-6 w-full max-w-sm shadow-xl">
+      <h2 class="text-base font-semibold mb-2">Start Single Measurement</h2>
+      <p class="text-sm text-gray-400 mb-5">Did you pump to flush the sampling chamber?</p>
+      <div class="flex gap-3 justify-end">
+        <button @click="cancelSingle" class="btn-toggle px-5 py-2">Cancel</button>
+        <button @click="confirmSingle" class="btn-primary px-5 py-2">Yes, Start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Calibration dialog ──────────────────────────────────────────────── -->
+  <div v-if="showCalModal"
+       class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center"
+       @click.self="closeCalModal">
+    <div class="bg-gray-800 border border-gray-600 rounded-xl p-6 w-full max-w-lg shadow-xl max-h-screen overflow-y-auto">
+
+      <!-- Page: start -->
+      <template v-if="calPage === 'start'">
+        <h2 class="text-base font-semibold mb-1">pH Tris Buffer Calibration</h2>
+        <p class="text-xs text-gray-400 mb-4">
+          1. Turn physical valve to calibration position<br>
+          2. Place inlet tube in Tris buffer bottle<br>
+          3. Close the drain valve once cuvette is empty
+        </p>
+
+        <div class="mb-4">
+          <label class="text-sm text-gray-400 block mb-2">Batch number</label>
+          <div class="flex items-center gap-2">
+            <button @click="calBatchNumber = Math.max(0, calBatchNumber - 10)" class="btn-toggle px-3 py-1.5 text-xs">−10</button>
+            <button @click="calBatchNumber = Math.max(0, calBatchNumber - 1)"  class="btn-toggle px-3 py-1.5 text-xs">−1</button>
+            <span class="w-16 text-center font-mono text-lg font-bold">{{ calBatchNumber }}</span>
+            <button @click="calBatchNumber++"      class="btn-toggle px-3 py-1.5 text-xs">+1</button>
+            <button @click="calBatchNumber += 10"  class="btn-toggle px-3 py-1.5 text-xs">+10</button>
+          </div>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm mb-5 cursor-pointer">
+          <input type="checkbox" v-model="calWithCleaning" class="w-4 h-4 accent-blue-500" />
+          Include cuvette cleaning (6 measurements instead of 3)
+        </label>
+
+        <div class="flex gap-3 justify-end">
+          <button @click="closeCalModal" class="btn-toggle px-5 py-2">Cancel</button>
+          <button @click="startCalibration" class="btn-primary px-5 py-2">Start Calibration</button>
+        </div>
+      </template><!-- /start -->
+
+      <!-- Page: running / cleaning / result -->
+      <template v-if="calPage !== 'start'">
+        <h2 class="text-base font-semibold mb-1">Calibration — Batch #{{ calBatchNumber }}</h2>
+
+        <!-- Cleaning prompt overlay -->
+        <div v-if="calPage === 'cleaning'"
+             class="mb-4 p-4 rounded-lg bg-amber-900/60 border border-amber-700 text-sm text-amber-200">
+          <div class="font-semibold mb-1">⚠  Clean the cuvette now</div>
+          <p class="text-xs mb-3">
+            Rinse the cuvette thoroughly. When finished, click Continue to proceed with the after-cleaning measurements.
+          </p>
+          <div class="flex gap-2">
+            <button @click="continueAfterCleaning" class="btn-primary text-xs py-1.5 px-4">Continue</button>
+            <button @click="stopCalibration" class="btn-toggle text-xs py-1.5 px-4">Abort</button>
+          </div>
+        </div>
+
+        <!-- Steps: before cleaning (first 3) -->
+        <div class="mb-3">
+          <div class="text-xs text-gray-400 uppercase tracking-wider mb-2">Before cuvette cleaning</div>
+          <div v-for="step in calSteps.slice(0, 3)" :key="step.index"
+               class="flex items-center gap-3 py-1.5 border-b border-gray-700 last:border-0">
+            <span class="w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                  :class="step.passed === null ? 'bg-gray-700 text-gray-400 animate-pulse' : step.passed ? 'bg-green-600 text-white' : 'bg-red-600 text-white'">
+              {{ step.passed === null ? '…' : step.passed ? '✓' : '✗' }}
+            </span>
+            <span class="text-sm">Step {{ step.index + 1 }}</span>
+            <span v-if="step.measured != null" class="ml-auto text-xs font-mono text-gray-300">
+              {{ step.measured.toFixed(4) }}
+              <span class="text-gray-500 ml-1">(theo {{ step.theoretical }})</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Steps: after cleaning (steps 3-5, if with_cleaning) -->
+        <div v-if="calWithCleaning && calSteps.length > 3" class="mb-3">
+          <div class="text-xs text-gray-400 uppercase tracking-wider mb-2">After cuvette cleaning</div>
+          <div v-for="step in calSteps.slice(3, 6)" :key="step.index"
+               class="flex items-center gap-3 py-1.5 border-b border-gray-700 last:border-0">
+            <span class="w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                  :class="step.passed === null ? 'bg-gray-700 text-gray-400 animate-pulse' : step.passed ? 'bg-green-600 text-white' : 'bg-red-600 text-white'">
+              {{ step.passed === null ? '…' : step.passed ? '✓' : '✗' }}
+            </span>
+            <span class="text-sm">Step {{ step.index + 1 }}</span>
+            <span v-if="step.measured != null" class="ml-auto text-xs font-mono text-gray-300">
+              {{ step.measured.toFixed(4) }}
+              <span class="text-gray-500 ml-1">(theo {{ step.theoretical }})</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Final result (page === 'result') -->
+        <div v-if="calPage === 'result'" class="p-3 rounded-lg mb-3"
+             :class="calResult === 2 ? 'bg-green-900/50 border border-green-700' : calResult === 1 ? 'bg-red-900/50 border border-red-700' : 'bg-gray-700'">
+          <div class="text-sm font-semibold" :class="calResultClass">{{ calResultText }}</div>
+          <div v-if="calDate" class="text-xs text-gray-400 mt-0.5">{{ calDate }}</div>
+          <div class="text-xs text-gray-400 mt-2">
+            Remember to turn physical valves back to Ferrybox mode.
+          </div>
+        </div>
+
+        <div class="flex gap-3 justify-end mt-3">
+          <button v-if="calPage !== 'result'" @click="stopCalibration" class="btn-toggle text-sm px-4 py-2">
+            Stop Calibration
+          </button>
+          <button @click="closeCalModal" class="btn-primary text-sm px-5 py-2">
+            {{ calPage === 'result' ? 'Close' : 'Close (keep running)' }}
+          </button>
+        </div>
+      </template><!-- /running -->
+
+    </div>
+  </div><!-- /cal modal -->
+
 </div><!-- /app -->
 
 <script>
@@ -372,14 +579,53 @@ const CHART_DARK = {
   titleColor: '#9ca3af',
 };
 
+const CO3_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#d946ef', '#eab308'];
+
+// ── Chart.js plugin: reference lines (vertical + horizontal dashed) ────────
+const refLinesPlugin = {
+  id: 'refLines',
+  afterDraw(chart) {
+    const opts = chart.options.plugins && chart.options.plugins.refLines;
+    if (!opts) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!scales.x || !scales.y || !chartArea) return;
+    ctx.save();
+    for (const line of (opts.vLines || [])) {
+      const px = scales.x.getPixelForValue(line.value);
+      if (px < chartArea.left || px > chartArea.right) continue;
+      ctx.beginPath();
+      ctx.moveTo(px, chartArea.top);
+      ctx.lineTo(px, chartArea.bottom);
+      ctx.strokeStyle = line.color || '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+    }
+    for (const line of (opts.hLines || [])) {
+      const py = scales.y.getPixelForValue(line.value);
+      if (py < chartArea.top || py > chartArea.bottom) continue;
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, py);
+      ctx.lineTo(chartArea.right, py);
+      ctx.strokeStyle = line.color || '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  },
+};
+
 createApp({
   setup() {
-    // ── Reactive state ────────────────────────────────────────────
+    // ── Reactive state ─────────────────────────────────────────────────────
     const connected      = ref(false);
     const instrumentType = ref('co3');
+    const boxId          = ref('');
     const modes          = ref(new Set());
     const measurementN   = ref(0);
-    const sensors        = ref({ t_cuvette: null, voltage: null, fb_temp: null, fb_sal: null });
+    const sensors        = ref({ t_cuvette: null, voltage: null, fb_temp: null, fb_sal: null, fb_pumping: null });
     const lastResult     = ref(null);
     const stepsCompleted = ref(new Set());
     const countdownS     = ref(null);
@@ -389,54 +635,89 @@ createApp({
     const wavelengths    = ref([]);
     const manualActive   = ref(false);
 
-    // Client-side hardware toggle state (tracks what we told the server)
-    const valveOpen   = ref(false);
-    const lightOn     = ref(false);
-    const shutterOpen = ref(false);
-    const stirrerOn   = ref(false);
+    const valveOpen    = ref(false);
+    const lightOn      = ref(false);
+    const shutterOpen  = ref(false);
+    const stirrerOn    = ref(false);
 
-    const logArea = ref(null);  // textarea DOM ref
+    const manualPumpDuration = ref(1.0);
+    const logArea            = ref(null);
 
-    // Config tab state
-    const configDye          = ref('');
-    const configAutoadjust   = ref('ON');
-    const configPumpTime     = ref(60.0);
-    const configIntervalMin  = ref(5);
-    const configIntTimeMs    = ref(18);
-    const configDrainMode    = ref('ON');
-    // Chart.js instances (not reactive — plain JS objects)
-    let spectrumChart = null;
-    let resultChart   = null;
+    // Config tab
+    const configDye         = ref('');
+    const configAutoadjust  = ref('ON');
+    const configPumpTime    = ref(60.0);
+    const configIntervalMin = ref(5);
+    const configIntTimeMs   = ref(18);
+    const configDrainMode   = ref('ON');
+    const testUdpEnabled    = ref(false);
 
-    // ── Computed ──────────────────────────────────────────────────
-    const isCo3              = computed(() => instrumentType.value === 'co3');
-    const isMeasuring        = computed(() => modes.value.has('Measuring'));
-    const isContinuous       = computed(() => modes.value.has('Continuous'));
-    const isAdjusting        = computed(() => modes.value.has('Adjusting'));
-    const canStartSingle     = computed(() => !isMeasuring.value && !isContinuous.value && !isAdjusting.value);
-    const canToggleContinuous = computed(() => !isMeasuring.value && !isAdjusting.value);
-    const canToggleManual    = computed(() => !isMeasuring.value && !isAdjusting.value);
-    const canEditConfig      = computed(() => !isMeasuring.value && !isAdjusting.value);
+    // Spectrum reference config
+    const lightThreshold = ref(60000);
+    const wl1            = ref(434.0);
+    const wl2            = ref(578.0);
+    const nirWl          = ref(730.0);
 
-    const intTimeOptions = computed(() => {
-      const opts = [];
-      for (let t = 1; t <= 19; t++) opts.push(t);
-      for (let t = 20; t <= 90; t += 10) opts.push(t);
-      for (let t = 100; t <= 4900; t += 100) opts.push(t);
-      return opts;
+    // Status tab
+    const dyeLevel = ref(2000);
+    const qcFlags  = ref({ flow: null, dye: null, biofouling: null, temp_sensor: null, udp: null, overall: null });
+    const ledDuties = ref([55, 55, 55]);
+
+    // Calibration state
+    const calResult      = ref(0);
+    const calDate        = ref('');
+    const calSteps       = ref([]);
+    const showCalModal   = ref(false);
+    const calPage        = ref('start');  // 'start' | 'running' | 'cleaning' | 'result'
+    const calBatchNumber = ref(0);
+    const calWithCleaning = ref(false);
+
+    // Single confirm dialog
+    const showSingleConfirm = ref(false);
+
+    // Chart instances (not reactive)
+    let spectrumChart  = null;
+    let resultChart    = null;
+    let uvFilterIndices = null;  // for CO3 UV-range filtering
+
+    // ── Computed ───────────────────────────────────────────────────────────
+    const isCo3          = computed(() => instrumentType.value === 'co3');
+    const isMeasuring    = computed(() => modes.value.has('Measuring'));
+    const isContinuous   = computed(() => modes.value.has('Continuous'));
+    const isAdjusting    = computed(() => modes.value.has('Adjusting'));
+    const isPaused       = computed(() => modes.value.has('Paused'));
+    const isCalibration  = computed(() => modes.value.has('Calibration'));
+
+    const canStartSingle      = computed(() => !isMeasuring.value && !isContinuous.value && !isAdjusting.value && !isCalibration.value);
+    const canToggleContinuous = computed(() => !isMeasuring.value && !isAdjusting.value && !isCalibration.value);
+    const canToggleManual     = computed(() => !isMeasuring.value && !isAdjusting.value && !isCalibration.value);
+    const canEditConfig       = computed(() => !isMeasuring.value && !isAdjusting.value && !isCalibration.value);
+    const canStartCalibration = computed(() => !isMeasuring.value && !isContinuous.value && !isCalibration.value);
+
+    const instrumentTitle = computed(() => {
+      const id = boxId.value || (isCo3.value ? 'CO₃' : 'pH');
+      return isCo3.value ? `${id}, parameter CO₃` : id;
     });
 
-    const instrumentTitle  = computed(() => isCo3.value ? 'CO₃ Instrument' : 'pH Instrument');
     const resultChartTitle = computed(() =>
-      isCo3.value ? 'Last CO₃ Measurement' : 'pH History (insitu)'
+      isCo3.value ? 'Last CO₃ Measurement' : 'Last pH Measurement'
     );
 
     const tabs = [
       { id: 'home',   label: 'Home'   },
       { id: 'manual', label: 'Manual' },
       { id: 'config', label: 'Config' },
+      { id: 'status', label: 'Status' },
       { id: 'log',    label: 'Log'    },
     ];
+
+    const intTimeOptions = computed(() => {
+      const opts = [];
+      for (let t = 1;   t <= 19;   t++)        opts.push(t);
+      for (let t = 20;  t <= 90;   t += 10)    opts.push(t);
+      for (let t = 100; t <= 4900; t += 100)   opts.push(t);
+      return opts;
+    });
 
     const progressSteps = computed(() => {
       const steps = [
@@ -444,14 +725,17 @@ createApp({
         { key: 'dark_blank',      label: 'Dark & Blank'    },
       ];
       for (let i = 1; i <= nCycles.value; i++) {
-        steps.push({ key: `measurement_${i}`, label: `Measurement ${i}` });
+        const key = isCo3.value ? `measurement_${i}` : `injection_${i}`;
+        steps.push({ key, label: `Measurement ${i}` });
       }
       return steps;
     });
 
     const statusText = computed(() => {
-      if (isMeasuring.value)  return `Measuring… (run #${measurementN.value})`;
-      if (isAdjusting.value)  return 'Adjusting light…';
+      if (isMeasuring.value)   return `Measuring… (run #${measurementN.value})`;
+      if (isAdjusting.value)   return 'Adjusting light…';
+      if (isCalibration.value) return 'Calibration in progress…';
+      if (isPaused.value)      return 'Continuous mode paused — Ferrybox pump is off';
       if (isContinuous.value && countdownS.value !== null) {
         const m = Math.floor(countdownS.value / 60);
         const s = countdownS.value % 60;
@@ -462,39 +746,49 @@ createApp({
     });
 
     const statusBarClass = computed(() => {
-      if (isMeasuring.value)  return 'bg-blue-900/60 text-blue-200 border border-blue-700';
-      if (isAdjusting.value)  return 'bg-amber-900/60 text-amber-200 border border-amber-700';
-      if (isContinuous.value) return 'bg-green-900/60 text-green-200 border border-green-700';
+      if (isMeasuring.value)   return 'bg-blue-900/60 text-blue-200 border border-blue-700';
+      if (isAdjusting.value)   return 'bg-amber-900/60 text-amber-200 border border-amber-700';
+      if (isCalibration.value) return 'bg-purple-900/60 text-purple-200 border border-purple-700';
+      if (isPaused.value)      return 'bg-yellow-900/60 text-yellow-200 border border-yellow-700';
+      if (isContinuous.value)  return 'bg-green-900/60 text-green-200 border border-green-700';
       return 'bg-gray-800 text-gray-400 border border-gray-700';
+    });
+
+    const fbPumpingText = computed(() => {
+      const p = sensors.value.fb_pumping;
+      if (p === null || p === undefined) return 'No Ferrybox';
+      return p === 1 ? 'On' : 'Off';
+    });
+    const fbPumpingClass = computed(() => {
+      const p = sensors.value.fb_pumping;
+      if (p === null || p === undefined) return 'text-gray-500';
+      return p === 1 ? 'text-green-400' : 'text-red-400';
     });
 
     const lastResultRows = computed(() => {
       const r = lastResult.value;
       if (!r) return [];
-      const fmt = (v, dec = 3) => (v != null ? v.toFixed(dec) : '—');
+      const fmt = (v, d = 3) => v != null ? v.toFixed(d) : '—';
       if (isCo3.value) {
         return [
-          { label: 'CO₃',        value: fmt(r.co3_umol_per_kg, 1) + ' µmol/kg' },
-          { label: 'T cuvette',  value: fmt(r.t_cuvette, 2)        + ' °C'     },
-          { label: 'S corrected',value: fmt(r.salinity_corrected, 3) + ' PSU'  },
-          { label: 'R ratio',    value: fmt(r.r_ratio, 4)                       },
-          { label: 'T insitu',   value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
-          { label: 'S insitu',   value: r.fb_sal  != null ? fmt(r.fb_sal, 3)  + ' PSU' : '—' },
+          { label: 'CO₃',       value: fmt(r.co3_umol_per_kg, 1) + ' µmol/kg' },
+          { label: 'T insitu',  value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
+          { label: 'S insitu',  value: r.fb_sal  != null ? fmt(r.fb_sal,  3) + ' PSU' : '—' },
+          { label: 'T cuvette', value: fmt(r.t_cuvette, 2) + ' °C' },
         ];
       }
       return [
-        { label: 'pH cuvette',  value: fmt(r.pH_cuvette, 4)          },
-        { label: 'pH insitu',   value: fmt(r.pH_insitu, 4)            },
-        { label: 'r²',          value: fmt(r.r_square, 4)             },
-        { label: 'T cuvette',   value: fmt(r.t_cuvette, 2) + ' °C'   },
-        { label: 'T insitu',    value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
-        { label: 'S insitu',    value: r.fb_sal  != null ? fmt(r.fb_sal, 3)  + ' PSU' : '—' },
+        { label: 'pH cuvette', value: fmt(r.pH_cuvette, 4) },
+        { label: 'T cuvette',  value: fmt(r.t_cuvette, 2) + ' °C'  },
+        { label: 'pH insitu',  value: fmt(r.pH_insitu, 4) },
+        { label: 'T insitu',   value: r.fb_temp != null ? fmt(r.fb_temp, 2) + ' °C'  : '—' },
+        { label: 'S insitu',   value: r.fb_sal  != null ? fmt(r.fb_sal,  3) + ' PSU' : '—' },
       ];
     });
 
     const sensorRows = computed(() => {
-      const s = sensors.value;
-      const fmt = (v, dec, unit) => v != null ? v.toFixed(dec) + ' ' + unit : '—';
+      const s   = sensors.value;
+      const fmt = (v, d, u) => v != null ? v.toFixed(d) + ' ' + u : '—';
       return [
         { label: 'T cuvette',          value: fmt(s.t_cuvette, 2, '°C')  },
         { label: 'Voltage',            value: fmt(s.voltage,   4, 'V')   },
@@ -503,111 +797,225 @@ createApp({
       ];
     });
 
-    // ── WebSocket ────────────────────────────────────────────────
-    let ws = null;
+    const qcFlagRows = [
+      { key: 'flow',        label: 'Flow'        },
+      { key: 'dye',         label: 'Dye'         },
+      { key: 'biofouling',  label: 'Biofouling'  },
+      { key: 'temp_sensor', label: 'Temp sensor' },
+    ];
+    const qcClass = (val) =>
+      val === null ? 'bg-gray-700 text-gray-400' : val ? 'bg-green-600 text-white' : 'bg-red-600 text-white';
+    const qcIcon  = (val) =>
+      val === null ? '?' : val ? '✓' : '✗';
 
-    const send = (msg) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg));
+    const calResultClass = computed(() => {
+      if (calResult.value === 0) return 'text-gray-400';
+      return calResult.value === 2 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold';
+    });
+    const calResultText = computed(() => {
+      if (calResult.value === 0) return 'No calibration result yet';
+      return calResult.value === 2 ? 'PASSED' : 'FAILED';
+    });
+
+    const ledChannels = ['Blue (434 nm)', 'Orange (578 nm)', 'Red (730 nm)'];
+
+    // ── Chart helpers ──────────────────────────────────────────────────────
+    const updateSpectrumLabels = () => {
+      if (!spectrumChart) return;
+      const wls = wavelengths.value;
+      if (!wls.length) return;
+      if (isCo3.value) {
+        uvFilterIndices = wls.reduce((acc, w, i) => { if (w >= 220 && w <= 360) acc.push(i); return acc; }, []);
+        spectrumChart.data.labels = uvFilterIndices.map(i => Math.round(wls[i]));
+      } else {
+        uvFilterIndices = null;
+        spectrumChart.data.labels = wls.map(w => Math.round(w));
       }
     };
 
-    // ── Message handler ───────────────────────────────────────────
+    const applySpectrumRefLines = () => {
+      if (!spectrumChart) return;
+      const vLines = isCo3.value
+        ? [ { value: 234, color: '#3b82f6' }, { value: 250, color: '#f97316' }, { value: 350, color: '#ffffff' } ]
+        : [ { value: wl1.value, color: '#3b82f6' }, { value: wl2.value, color: '#f97316' }, { value: nirWl.value, color: '#ef4444' } ];
+      const hLines = isCo3.value ? [] : [{ value: lightThreshold.value, color: '#9ca3af' }];
+      spectrumChart.options.plugins.refLines = { vLines, hLines };
+      spectrumChart.update('none');
+    };
+
+    const updateResultChart = (msg) => {
+      if (!resultChart) return;
+      if (msg.instrument === 'co3' && msg.absorption_spectra) {
+        const wls = msg.absorption_wavelengths || [];
+        resultChart.options.scales.x.title.text = 'Wavelength (nm)';
+        resultChart.options.scales.x.min = 220;
+        resultChart.options.scales.x.max = 360;
+        resultChart.options.scales.y.title.text = 'Absorbance (A.U.)';
+        resultChart.data.datasets = Object.entries(msg.absorption_spectra).map(([idx, vals], i) => ({
+          label:       `Injection ${+idx + 1}`,
+          data:        wls.map((w, j) => ({ x: w, y: vals[j] })),
+          borderColor: CO3_COLORS[i % CO3_COLORS.length],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          showLine:    true,
+          fill:        false,
+        }));
+        resultChart.update();
+      } else if (msg.instrument === 'ph') {
+        const scatter = msg.injections_scatter || [];
+        const maxVol  = scatter.length ? Math.max(...scatter.map(p => p.vol_ml)) : 0.3;
+        const slope   = msg.slope || 0;
+        const intercept = msg.pH_cuvette || 8;
+        resultChart.options.scales.x.title.text = 'Volume injected (mL)';
+        resultChart.options.scales.x.min = 0;
+        delete resultChart.options.scales.x.max;
+        resultChart.options.scales.y.title.text = 'pH';
+        resultChart.data.datasets = [
+          {
+            label:           'Measurements',
+            data:            scatter.map(p => ({ x: p.vol_ml, y: p.pH })),
+            backgroundColor: 'rgba(59,130,246,0.8)',
+            borderColor:     'rgba(59,130,246,0.8)',
+            pointRadius:     6,
+            pointHoverRadius: 8,
+            showLine:        false,
+          },
+          {
+            label:       `Regression (r²=${(msg.r_square || 0).toFixed(4)})`,
+            data:        [
+              { x: 0,            y: intercept },
+              { x: maxVol * 1.15, y: intercept + slope * maxVol * 1.15 },
+            ],
+            borderColor: '#22c55e',
+            pointRadius: 0,
+            showLine:    true,
+            borderWidth: 2,
+            borderDash:  [6, 3],
+          },
+        ];
+        resultChart.update();
+      }
+    };
+
+    // ── WebSocket send ─────────────────────────────────────────────────────
+    let ws = null;
+    const send = (msg) => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    };
+
+    // ── Message handler ────────────────────────────────────────────────────
+    const applyConfig = (c) => {
+      if (c.dye               != null) configDye.value         = c.dye;
+      if (c.autoadjust_mode   != null) configAutoadjust.value  = c.autoadjust_mode;
+      if (c.pump_time_s       != null) configPumpTime.value    = c.pump_time_s;
+      if (c.interval_min      != null) configIntervalMin.value = Math.round(c.interval_min);
+      if (c.integration_time_ms != null) configIntTimeMs.value = c.integration_time_ms;
+      if (c.drain_mode        != null) configDrainMode.value   = c.drain_mode;
+      if (c.manual_pump_duration_s != null) manualPumpDuration.value = c.manual_pump_duration_s;
+      if (c.light_threshold   != null) lightThreshold.value    = c.light_threshold;
+      if (c.wl1_nm            != null) wl1.value               = c.wl1_nm;
+      if (c.wl2_nm            != null) wl2.value               = c.wl2_nm;
+      if (c.nir_nm            != null) nirWl.value             = c.nir_nm;
+      if (c.led_duties && c.led_duties.length >= 3) ledDuties.value = c.led_duties.slice(0, 3);
+      applySpectrumRefLines();
+    };
+
     const handleMessage = (msg) => {
       switch (msg.type) {
 
         case 'state_snapshot':
           instrumentType.value = msg.instrument_type || 'co3';
-          modes.value          = new Set(msg.modes || []);
-          measurementN.value   = msg.measurement_n  || 0;
-          lastResult.value     = msg.last_result     || null;
-          nCycles.value        = msg.n_cycles        || 1;
-          wavelengths.value    = msg.wavelengths     || [];
+          boxId.value          = msg.box_id          || '';
+          modes.value          = new Set(msg.modes   || []);
+          measurementN.value   = msg.measurement_n   || 0;
+          lastResult.value     = msg.last_result      || null;
+          nCycles.value        = msg.n_cycles         || 1;
+          wavelengths.value    = msg.wavelengths       || [];
+          dyeLevel.value       = msg.dye_level         ?? 2000;
           if (msg.config) applyConfig(msg.config);
           if (wavelengths.value.length && spectrumChart) {
-            spectrumChart.data.labels = wavelengths.value.map(w => Math.round(w));
+            updateSpectrumLabels();
+            applySpectrumRefLines();
             spectrumChart.update('none');
-          }
-          if (resultChart && (msg.instrument_type || 'co3') === 'co3') {
-            resultChart.data.datasets = [];
-            resultChart.data.labels   = [];
-            resultChart.options.scales.x.title = { display: true, text: 'Wavelength (nm)', color: CHART_DARK.titleColor };
-            resultChart.options.scales.y.title = { display: true, text: 'Absorbance (A.U.)', color: CHART_DARK.titleColor };
-            resultChart.update('none');
           }
           break;
 
         case 'sensor_update':
           sensors.value = {
-            t_cuvette: msg.t_cuvette,
-            voltage:   msg.voltage,
-            fb_temp:   msg.fb_temp,
-            fb_sal:    msg.fb_sal,
+            t_cuvette:  msg.t_cuvette,
+            voltage:    msg.voltage,
+            fb_temp:    msg.fb_temp,
+            fb_sal:     msg.fb_sal,
+            fb_pumping: msg.fb_pumping ?? null,
           };
           break;
 
         case 'spectrum_update':
           if (spectrumChart && msg.intensities) {
-            spectrumChart.data.datasets[0].data = msg.intensities;
+            const data = uvFilterIndices
+              ? uvFilterIndices.map(i => msg.intensities[i])
+              : msg.intensities;
+            spectrumChart.data.datasets[0].data = data;
             spectrumChart.update('none');
           }
           break;
 
         case 'mode_change':
-          modes.value      = new Set(msg.modes || []);
-          measurementN.value = msg.measurement_n || 0;
+          modes.value        = new Set(msg.modes || []);
+          measurementN.value = msg.measurement_n  || 0;
           if (!modes.value.has('Measuring'))   stepsCompleted.value = new Set();
-          if (!modes.value.has('Continuous'))  countdownS.value = null;
+          if (!modes.value.has('Continuous'))  countdownS.value     = null;
+          if (!modes.value.has('Calibration') && calPage.value === 'running') {
+            calPage.value = 'result';  // aborted externally
+          }
           break;
 
         case 'step_complete':
           stepsCompleted.value = new Set([...stepsCompleted.value, msg.step]);
           if (msg.step === 'adjusting_light' && isCo3.value && resultChart) {
             resultChart.data.datasets = [];
-            resultChart.data.labels   = [];
             resultChart.update('none');
           }
           break;
 
         case 'measurement_result':
           lastResult.value = msg;
-          if (resultChart) {
-            if (msg.instrument === 'co3' && msg.absorption_spectra) {
-              const CO3_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#d946ef', '#eab308'];
-              resultChart.data.labels   = (msg.absorption_wavelengths || []).map(w => Math.round(w));
-              resultChart.data.datasets = Object.entries(msg.absorption_spectra).map(([idx, values], i) => ({
-                label: `Injection ${parseInt(idx) + 1}`,
-                data: values,
-                borderColor: CO3_COLORS[i % CO3_COLORS.length],
-                borderWidth: 1.5,
-                pointRadius: 0,
-                fill: false,
-              }));
-              resultChart.update();
-            } else if (msg.instrument !== 'co3') {
-              const label = (msg.timestamp || '').substring(0, 16);
-              const value = msg.pH_insitu;
-              resultChart.data.labels.push(label);
-              resultChart.data.datasets[0].data.push(value);
-              if (resultChart.data.labels.length > 50) {
-                resultChart.data.labels.shift();
-                resultChart.data.datasets[0].data.shift();
-              }
-              resultChart.update();
-            }
-          }
+          updateResultChart(msg);
           break;
 
         case 'countdown':
           countdownS.value = msg.seconds_remaining;
           break;
 
+        case 'dye_level':
+          dyeLevel.value = msg.value;
+          break;
+
+        case 'qc_update':
+          qcFlags.value = {
+            flow:        msg.qc_flow        ?? null,
+            dye:         msg.qc_dye         ?? null,
+            biofouling:  msg.qc_biofouling  ?? null,
+            temp_sensor: msg.qc_temp_sensor ?? null,
+            udp:         msg.qc_udp         ?? null,
+            overall:     msg.qc_overall     ?? null,
+          };
+          break;
+
+        case 'calibration_update':
+          calSteps.value = msg.steps || [];
+          if (msg.cleaning_prompt)  calPage.value = 'cleaning';
+          if (msg.result != null) {
+            calResult.value = msg.result;
+            calDate.value   = msg.date || '';
+            calPage.value   = 'result';
+          }
+          break;
+
         case 'log_line':
           logLines.value.push(msg.text);
-          if (logLines.value.length > 200) logLines.value.shift();
-          nextTick(() => {
-            if (logArea.value) logArea.value.scrollTop = logArea.value.scrollHeight;
-          });
+          if (logLines.value.length > 300) logLines.value.shift();
+          nextTick(() => { if (logArea.value) logArea.value.scrollTop = logArea.value.scrollHeight; });
           break;
 
         case 'config_update':
@@ -615,65 +1023,96 @@ createApp({
           break;
 
         case 'history':
-          if (!isCo3.value && resultChart && msg.points && msg.points.length) {
-            resultChart.data.labels          = msg.points.map(p => p.timestamp || '');
-            resultChart.data.datasets[0].data = msg.points.map(p => p.value ?? null);
-            resultChart.update();
-          }
+          // pH history not used for Plot 2 — Plot 2 shows last-measurement regression only
           break;
       }
     };
 
-    // ── Commands ──────────────────────────────────────────────────
-    const startSingle       = () => send({ cmd: 'start_single' });
-    const toggleContinuous  = () => send({ cmd: isContinuous.value ? 'stop_continuous' : 'start_continuous' });
-    const toggleManual      = () => { if (canToggleManual.value) manualActive.value = !manualActive.value; };
+    // ── Commands ───────────────────────────────────────────────────────────
+    const startSingle      = () => { showSingleConfirm.value = true; };
+    const confirmSingle    = () => { showSingleConfirm.value = false; send({ cmd: 'start_single' }); };
+    const cancelSingle     = () => { showSingleConfirm.value = false; };
 
-    const toggleValve  = () => { valveOpen.value   = !valveOpen.value;   send({ cmd: valveOpen.value   ? 'open_valve'    : 'close_valve'   }); };
-    const toggleLight  = () => { lightOn.value     = !lightOn.value;     send({ cmd: lightOn.value     ? 'turn_on_light' : 'turn_off_light'}); };
-    const toggleShutter= () => { shutterOpen.value = !shutterOpen.value; send({ cmd: shutterOpen.value ? 'open_shutter'  : 'close_shutter' }); };
-    const toggleStirrer= () => { stirrerOn.value   = !stirrerOn.value;   send({ cmd: stirrerOn.value   ? 'start_stirrer' : 'stop_stirrer'  }); };
+    const toggleContinuous = () => send({ cmd: isContinuous.value ? 'stop_continuous' : 'start_continuous' });
+    const toggleManual     = () => { if (canToggleManual.value) manualActive.value = !manualActive.value; };
 
-    const manualPumpDuration = ref(1.0);
-    const runWaterPump  = () => send({ cmd: 'run_water_pump', duration_s: manualPumpDuration.value });
-    const pulseDyePump  = () => send({ cmd: 'pulse_dye_pump', n_shots: 3 });
-    const drainCuvette  = () => send({ cmd: 'drain_cuvette' });
-    const autoAdjust    = () => send({ cmd: 'auto_adjust' });
-
-    // ── Config helpers ────────────────────────────────────────────
-    const applyConfig = (c) => {
-      if (c.dye             != null) configDye.value         = c.dye;
-      if (c.autoadjust_mode != null) configAutoadjust.value  = c.autoadjust_mode;
-      if (c.pump_time_s     != null) configPumpTime.value    = c.pump_time_s;
-      if (c.interval_min    != null) configIntervalMin.value = Math.round(c.interval_min);
-      if (c.integration_time_ms != null) configIntTimeMs.value = c.integration_time_ms;
-      if (c.drain_mode      != null) configDrainMode.value   = c.drain_mode;
-      if (c.manual_pump_duration_s != null) manualPumpDuration.value = c.manual_pump_duration_s;
+    const toggleValve   = () => { valveOpen.value   = !valveOpen.value;   send({ cmd: valveOpen.value   ? 'open_valve'    : 'close_valve'    }); };
+    const toggleShutter = () => { shutterOpen.value = !shutterOpen.value; send({ cmd: shutterOpen.value ? 'open_shutter'  : 'close_shutter'  }); };
+    const toggleStirrer = () => { stirrerOn.value   = !stirrerOn.value;   send({ cmd: stirrerOn.value   ? 'start_stirrer' : 'stop_stirrer'   }); };
+    const toggleLight   = () => {
+      lightOn.value = !lightOn.value;
+      send({ cmd: isCo3.value
+        ? (lightOn.value ? 'turn_on_light'  : 'turn_off_light')
+        : (lightOn.value ? 'turn_on_leds'   : 'turn_off_leds')  });
     };
 
+    const runWaterPump = () => send({ cmd: 'run_water_pump', duration_s: manualPumpDuration.value });
+    const pulseDyePump = () => send({ cmd: 'pulse_dye_pump', n_shots: 3 });
+    const drainCuvette = () => send({ cmd: 'drain_cuvette' });
+    const autoAdjust   = () => send({ cmd: 'auto_adjust' });
+
+    const onLedChange = (i, duty) => {
+      duty = Math.max(0, Math.min(100, Math.round(+duty)));
+      ledDuties.value[i] = duty;
+      send({ cmd: 'set_led_duty_cycle', channel: i, duty });
+      if (!lightOn.value) { send({ cmd: 'turn_on_leds' }); lightOn.value = true; }
+    };
+
+    // Config commands
     const saveConfig         = () => send({ cmd: 'save_config' });
-    const onDyeChange        = ()  => send({ cmd: 'set_dye_type', dye: configDye.value });
-    const onAutoadjustChange = ()  => send({ cmd: 'set_autoadjust', mode: configAutoadjust.value });
-    const onIntervalChange   = ()  => send({ cmd: 'set_sampling_interval', interval_min: configIntervalMin.value });
-    const onIntTimeChange    = ()  => send({ cmd: 'set_integration_time', time_ms: configIntTimeMs.value });
-    const onDrainModeChange  = ()  => send({ cmd: 'set_drain_mode', mode: configDrainMode.value });
+    const onDyeChange        = () => send({ cmd: 'set_dye_type',          dye:          configDye.value         });
+    const onAutoadjustChange = () => send({ cmd: 'set_autoadjust',        mode:         configAutoadjust.value  });
+    const onIntervalChange   = () => send({ cmd: 'set_sampling_interval', interval_min: configIntervalMin.value });
+    const onIntTimeChange    = () => send({ cmd: 'set_integration_time',  time_ms:      configIntTimeMs.value   });
+    const onDrainModeChange  = () => send({ cmd: 'set_drain_mode',        mode:         configDrainMode.value   });
+    const toggleTestUdp      = () => {
+      testUdpEnabled.value = !testUdpEnabled.value;
+      send({ cmd: 'test_udp', enabled: testUdpEnabled.value });
+    };
 
-    // ── Chart initialisation ──────────────────────────────────────
+    // Dye level
+    const refillDye = () => send({ cmd: 'refill_dye' });
+    const clearDye  = () => send({ cmd: 'clear_dye'  });
+
+    // Calibration
+    const openCalModal = () => {
+      calPage.value = 'start';
+      showCalModal.value = true;
+    };
+    const closeCalModal = () => {
+      showCalModal.value = false;
+    };
+    const startCalibration = () => {
+      calSteps.value = [];
+      calPage.value  = 'running';
+      send({ cmd: 'start_calibration', batch_number: calBatchNumber.value, with_cleaning: calWithCleaning.value });
+    };
+    const stopCalibration       = () => send({ cmd: 'stop_calibration' });
+    const continueAfterCleaning = () => { calPage.value = 'running'; };
+
+    // ── Chart initialisation ────────────────────────────────────────────────
     const initCharts = () => {
-      // Shared chart defaults
       Chart.defaults.color = CHART_DARK.tickColor;
+      Chart.register(refLinesPlugin);
 
-      // Plot 1: live spectrum
+      // Plot 1: Live spectrum
       spectrumChart = new Chart(
         document.getElementById('spectrumChart').getContext('2d'),
         {
           type: 'line',
-          data: { labels: [], datasets: [{ label: 'Intensity', data: [], borderColor: '#3b82f6', borderWidth: 1, pointRadius: 0, fill: false }] },
+          data: {
+            labels:   [],
+            datasets: [{ label: 'Intensity', data: [], borderColor: '#3b82f6',
+                         borderWidth: 1, pointRadius: 0, fill: false }],
+          },
           options: {
             animation: false,
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            plugins: {
+              legend:   { display: false },
+              refLines: { vLines: [], hLines: [] },
+            },
             scales: {
               x: {
                 ticks: { maxTicksLimit: 8, color: CHART_DARK.tickColor },
@@ -681,7 +1120,7 @@ createApp({
                 title: { display: true, text: 'Wavelength (nm)', color: CHART_DARK.titleColor },
               },
               y: {
-                min: 0,
+                min:   0,
                 ticks: { color: CHART_DARK.tickColor },
                 grid:  { color: CHART_DARK.gridColor },
                 title: { display: true, text: 'Intensity (counts)', color: CHART_DARK.titleColor },
@@ -691,37 +1130,30 @@ createApp({
         }
       );
 
-      // Plot 2: measurement history
+      // Plot 2: scatter (CO3 absorption spectra OR pH injection scatter + regression)
       resultChart = new Chart(
         document.getElementById('resultChart').getContext('2d'),
         {
-          type: 'line',
-          data: {
-            labels: [],
-            datasets: [{
-              label: 'Value',
-              data: [],
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16,185,129,0.12)',
-              borderWidth: 2,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              fill: true,
-              tension: 0.15,
-            }],
-          },
+          type: 'scatter',
+          data: { datasets: [] },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            animation: false,
+            plugins: {
+              legend: { display: true, labels: { color: CHART_DARK.tickColor, boxWidth: 12, font: { size: 11 } } },
+            },
             scales: {
               x: {
-                ticks: { maxTicksLimit: 6, color: CHART_DARK.tickColor, maxRotation: 30 },
+                type:  'linear',
+                ticks: { maxTicksLimit: 8, color: CHART_DARK.tickColor },
                 grid:  { color: CHART_DARK.gridColor },
+                title: { display: true, text: 'Wavelength (nm)', color: CHART_DARK.titleColor },
               },
               y: {
                 ticks: { color: CHART_DARK.tickColor },
                 grid:  { color: CHART_DARK.gridColor },
+                title: { display: true, text: '', color: CHART_DARK.titleColor },
               },
             },
           },
@@ -729,49 +1161,48 @@ createApp({
       );
     };
 
-    // ── WebSocket connect with auto-reconnect ─────────────────────
+    // ── WebSocket connection ────────────────────────────────────────────────
     const connectWS = () => {
       const url = `ws://${window.location.host}/ws`;
       ws = new WebSocket(url);
       ws.onopen    = ()  => { connected.value = true; };
       ws.onclose   = ()  => { connected.value = false; setTimeout(connectWS, 3000); };
       ws.onerror   = ()  => { connected.value = false; };
-      ws.onmessage = (e) => {
-        try { handleMessage(JSON.parse(e.data)); }
-        catch (err) { console.error('WS parse error:', err); }
-      };
+      ws.onmessage = (e) => { try { handleMessage(JSON.parse(e.data)); } catch (err) { console.error('WS:', err); } };
     };
 
-    onMounted(() => {
-      initCharts();
-      connectWS();
-    });
+    onMounted(()  => { initCharts(); connectWS(); });
+    onUnmounted(() => { if (ws) ws.close(); });
 
-    onUnmounted(() => {
-      if (ws) ws.close();
-    });
-
+    // ── Return ─────────────────────────────────────────────────────────────
     return {
       // State
-      connected, instrumentType, modes, measurementN,
+      connected, instrumentType, boxId, modes, measurementN,
       sensors, lastResult, stepsCompleted, countdownS, logLines,
       activeTab, nCycles, wavelengths, manualActive,
       valveOpen, lightOn, shutterOpen, stirrerOn,
-      logArea,
+      manualPumpDuration, logArea,
       configDye, configAutoadjust, configPumpTime, configIntervalMin,
-      configIntTimeMs, configDrainMode,
+      configIntTimeMs, configDrainMode, testUdpEnabled,
+      dyeLevel, qcFlags, ledDuties,
+      calResult, calDate, calSteps, calPage,
+      showSingleConfirm, showCalModal, calBatchNumber, calWithCleaning,
       // Computed
-      isCo3, isMeasuring, isContinuous, isAdjusting,
-      canStartSingle, canToggleContinuous, canToggleManual, canEditConfig,
+      isCo3, isMeasuring, isContinuous, isAdjusting, isPaused, isCalibration,
+      canStartSingle, canToggleContinuous, canToggleManual, canEditConfig, canStartCalibration,
       instrumentTitle, resultChartTitle, tabs, progressSteps,
       statusText, statusBarClass, lastResultRows, sensorRows,
-      intTimeOptions,
+      intTimeOptions, fbPumpingText, fbPumpingClass,
+      qcFlagRows, qcClass, qcIcon, calResultClass, calResultText, ledChannels,
       // Commands
-      startSingle, toggleContinuous, toggleManual,
+      startSingle, confirmSingle, cancelSingle,
+      toggleContinuous, toggleManual,
       toggleValve, toggleLight, toggleShutter, toggleStirrer,
       runWaterPump, pulseDyePump, drainCuvette, autoAdjust,
-      saveConfig,
-      onDyeChange, onAutoadjustChange, onIntervalChange, onIntTimeChange, onDrainModeChange,
+      onLedChange,
+      saveConfig, onDyeChange, onAutoadjustChange, onIntervalChange, onIntTimeChange, onDrainModeChange, toggleTestUdp,
+      refillDye, clearDye,
+      openCalModal, closeCalModal, startCalibration, stopCalibration, continueAfterCleaning,
     };
   },
 }).mount('#app');

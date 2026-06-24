@@ -89,6 +89,18 @@ class CO3MeasurementResult:
     # ── Ferrybox snapshot at measurement time ────────────────────────────
     fb_temp: float | None = None   # °C (sea-surface, from UDP)
     fb_sal: float | None = None    # PSU (from UDP)
+    fb_pumping: int | None = None  # Ferrybox pump status (1/0/None)
+    longitude: float | None = None # decimal degrees
+    latitude: float | None = None  # decimal degrees
+    box_id: str | None = None      # instrument box identifier
+
+    # ── Quality-control flags (tri-state: None=not evaluated) ─────────────
+    qc_flow: bool | None = None
+    qc_dye: bool | None = None
+    qc_biofouling: bool | None = None
+    qc_temp_sensor: bool | None = None
+    qc_udp: bool | None = None
+    qc_overall: bool | None = None
 
     def summary(self) -> str:
         return (
@@ -107,6 +119,13 @@ class CO3MeasurementResult:
             "t_cuvette": self.t_cuvette,
             "salinity_input": self.salinity_input,
             "salinity_corrected": self.salinity_corrected,
+            "fb_temp": self.fb_temp,
+            "fb_sal": self.fb_sal,
+            "longitude": self.longitude,
+            "latitude": self.latitude,
+            "ship_code": self.ship_code,
+            "box_id": self.box_id,
+            "qc_overall": self.qc_overall,
             "timestamp": self.timestamp.isoformat(timespec="seconds"),
         }
 
@@ -176,6 +195,18 @@ class pHMeasurementResult:
     # ── Ferrybox snapshot at measurement time ────────────────────────────
     fb_temp: float | None = None   # °C (sea-surface, from UDP)
     fb_sal: float | None = None    # PSU (from UDP)
+    fb_pumping: int | None = None  # Ferrybox pump status (1/0/None)
+    longitude: float | None = None # decimal degrees
+    latitude: float | None = None  # decimal degrees
+    box_id: str | None = None      # instrument box identifier
+
+    # ── Quality-control flags (tri-state: None=not evaluated) ─────────────
+    qc_flow: bool | None = None
+    qc_dye: bool | None = None
+    qc_biofouling: bool | None = None
+    qc_temp_sensor: bool | None = None
+    qc_udp: bool | None = None
+    qc_overall: bool | None = None
 
     def summary(self) -> str:
         return (
@@ -194,9 +225,17 @@ class pHMeasurementResult:
             "pH_cuvette": self.pH_cuvette,
             "pH_insitu": self.pH_insitu,
             "r_square": self.r_square,
+            "perturbation": self.slope,
             "t_cuvette": self.t_cuvette,
             "salinity_input": self.salinity_input,
             "salinity_corrected": self.salinity_corrected,
+            "fb_temp": self.fb_temp,
+            "fb_sal": self.fb_sal,
+            "longitude": self.longitude,
+            "latitude": self.latitude,
+            "ship_code": self.ship_code,
+            "box_id": self.box_id,
+            "qc_overall": self.qc_overall,
             "timestamp": self.timestamp.isoformat(timespec="seconds"),
         }
 

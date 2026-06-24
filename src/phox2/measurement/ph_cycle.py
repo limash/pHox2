@@ -39,6 +39,7 @@ from phox2.measurement.models import (
     pHInjectionResult,
     pHMeasurementResult,
 )
+from phox2.measurement.qc import evaluate_qc
 from phox2.physics.ph_calculator import pHCalculator
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,8 @@ class pHMeasurementCycle:
         integration_time_ms: float,
         ship_code: str = "UNKNOWN",
         t_ferrybox: float | None = None,
+        box_id: str | None = None,
+        flow_threshold: float = 2000.0,
     ) -> None:
         self._spec = spectrometer
         self._valve = valve
@@ -106,6 +109,8 @@ class pHMeasurementCycle:
         self._integration_time_ms = integration_time_ms
         self._ship_code = ship_code
         self._t_ferrybox = t_ferrybox
+        self._box_id = box_id
+        self._flow_threshold = flow_threshold
 
         # Resolved during initialise()
         self._wavelengths: np.ndarray | None = None
@@ -138,6 +143,9 @@ class pHMeasurementCycle:
         flush_before: bool = False,
         fb_temp: float | None = None,
         fb_sal: float | None = None,
+        fb_pumping: int | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         on_step: Callable[[str], None] | None = None,
     ) -> pHMeasurementResult:
         """
@@ -217,12 +225,16 @@ class pHMeasurementCycle:
         # ── 7. Open valve ─────────────────────────────────────────────────
         await self._valve.open()
 
+        # ── 7b. Flow QC: fresh blue-pixel read with clean sample flowing ──
+        await self._sleep(3.0)
+        blue_now = await self._fresh_blue_level()
+
         # ── 8. Build result ───────────────────────────────────────────────
         pH_cuvette, pH_insitu, r_square, slope = pHCalculator.regress(
             ph_values=[inj.pH for inj in injections],
             vol_injected_ml=[inj.vol_injected_ml for inj in injections],
             t_cuvette_values=[inj.t_cuvette for inj in injections],
-            t_ferrybox=self._t_ferrybox,
+            t_ferrybox=fb_temp if fb_temp is not None else self._t_ferrybox,
         )
 
         last = injections[-1]
@@ -231,6 +243,18 @@ class pHMeasurementCycle:
             dark=dark,
             blank=blank,
             injections=injection_spectra,
+        )
+
+        qc = evaluate_qc(
+            dark=dark,
+            blank=blank,
+            injection_spectra=injection_spectra,
+            voltages=[inj.voltage for inj in injections],
+            blue_px=self._px1,
+            blue_now=blue_now,
+            integration_time_ms=self._integration_time_ms,
+            fb_pumping=fb_pumping,
+            flow_threshold=self._flow_threshold,
         )
 
         result = pHMeasurementResult(
@@ -257,9 +281,28 @@ class pHMeasurementCycle:
             spectra=spectral,
             fb_temp=fb_temp,
             fb_sal=fb_sal,
+            fb_pumping=fb_pumping,
+            longitude=longitude,
+            latitude=latitude,
+            box_id=self._box_id,
+            qc_flow=qc.flow,
+            qc_dye=qc.dye,
+            qc_biofouling=qc.biofouling,
+            qc_temp_sensor=qc.temp_sensor,
+            qc_udp=qc.udp,
+            qc_overall=qc.overall,
         )
         logger.info(result.summary())
         return result
+
+    async def _fresh_blue_level(self) -> float | None:
+        """Read a fresh spectrum and return the blue / λ1 pixel intensity."""
+        try:
+            spectrum = await self._spec.get_intensities()
+            return float(spectrum[self._px1])
+        except Exception:
+            logger.debug("Could not read fresh blue level for flow QC", exc_info=True)
+            return None
 
     # ── Private helpers ───────────────────────────────────────────────────
 

@@ -34,6 +34,7 @@ from phox2.measurement.models import (
     CO3MeasurementResult,
     SpectralData,
 )
+from phox2.measurement.qc import evaluate_qc
 from phox2.physics.co3_calculator import (
     AbsorbanceReadings,
     CO3Calculator,
@@ -132,6 +133,8 @@ class CO3MeasurementCycle:
         adj_cfg: SpectrometerAdjustConfig,
         integration_time_ms: float,
         ship_code: str = "UNKNOWN",
+        box_id: str | None = None,
+        flow_threshold: float = 2000.0,
     ) -> None:
         self._spec = spectrometer
         self._valve = valve
@@ -149,6 +152,8 @@ class CO3MeasurementCycle:
         self._adj = adj_cfg
         self._integration_time_ms = integration_time_ms
         self._ship_code = ship_code
+        self._box_id = box_id
+        self._flow_threshold = flow_threshold
 
         # Resolved during initialise()
         self._wavelengths: np.ndarray | None = None
@@ -181,6 +186,9 @@ class CO3MeasurementCycle:
         flush_before: bool = False,
         fb_temp: float | None = None,
         fb_sal: float | None = None,
+        fb_pumping: int | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         on_step: Callable[[str], None] | None = None,
     ) -> CO3MeasurementResult:
         """
@@ -264,6 +272,10 @@ class CO3MeasurementCycle:
         # ── 7. Open valve ─────────────────────────────────────────────────
         await self._valve.open()
 
+        # ── 7b. Flow QC: fresh blue-pixel read with clean sample flowing ──
+        await self._sleep(3.0)
+        blue_now = await self._fresh_blue_level()
+
         # ── 8. Build result ───────────────────────────────────────────────
         # With n_cycles=1 (typical for CO3) take the single result directly.
         # Multiple cycles: take the mean CO3 (could be extended to regression).
@@ -274,6 +286,18 @@ class CO3MeasurementCycle:
             dark=dark,
             blank=blank,
             injections=injection_spectra,
+        )
+
+        qc = evaluate_qc(
+            dark=dark,
+            blank=blank,
+            injection_spectra=injection_spectra,
+            voltages=[inj.voltage for inj in injections],
+            blue_px=self._px1,
+            blue_now=blue_now,
+            integration_time_ms=self._integration_time_ms,
+            fb_pumping=fb_pumping,
+            flow_threshold=self._flow_threshold,
         )
 
         result = CO3MeasurementResult(
@@ -297,9 +321,28 @@ class CO3MeasurementCycle:
             spectra=spectral,
             fb_temp=fb_temp,
             fb_sal=fb_sal,
+            fb_pumping=fb_pumping,
+            longitude=longitude,
+            latitude=latitude,
+            box_id=self._box_id,
+            qc_flow=qc.flow,
+            qc_dye=qc.dye,
+            qc_biofouling=qc.biofouling,
+            qc_temp_sensor=qc.temp_sensor,
+            qc_udp=qc.udp,
+            qc_overall=qc.overall,
         )
         logger.info(result.summary())
         return result
+
+    async def _fresh_blue_level(self) -> float | None:
+        """Read a fresh spectrum and return the blue / λ1 pixel intensity."""
+        try:
+            spectrum = await self._spec.get_intensities()
+            return float(spectrum[self._px1])
+        except Exception:
+            logger.debug("Could not read fresh blue level for flow QC", exc_info=True)
+            return None
 
     # ── Private helpers ───────────────────────────────────────────────────
 

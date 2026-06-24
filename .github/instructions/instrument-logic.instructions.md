@@ -123,6 +123,20 @@ Config is loaded via **Hydra/OmegaConf** from `configs/config.yaml`. Access the 
 | Key | Type | Example | Description |
 |-----|------|---------|-------------|
 | `code` | str | `"NB"` | Ship/platform identifier included in every log row |
+| `box_id` | str | `"pHox1"` | Instrument box identifier (original `BOX_ID`); shown in the GUI title bar and written as the `box_id` column in logs / Ferrybox payloads |
+
+### `qc` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `flow_threshold` | int | `2000` | Minimum blue-pixel intensity rise (post-cycle vs last injection) for the Flow QC check to pass |
+
+### `autostart` section
+
+| Key | Type | Example | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Start a measurement mode automatically on launch |
+| `mode` | str | `"pump"` | `"pump"` (wait for Ferrybox pump on, then run Continuous; pause/resume with pump), `"now"` (start Continuous immediately), or `"time"` (documented but a no-op, as in the original) |
 
 ### `output` section
 
@@ -295,6 +309,15 @@ Primary DTO returned by `CO3InstrumentAPI.run_single_measurement()`.
 | `dye` | `str` | Dye name from config |
 | `fb_temp` | `float \| None` | Ferrybox sea-surface temperature (°C) |
 | `fb_sal` | `float \| None` | Ferrybox salinity (PSU) |
+| `fb_pumping` | `int \| None` | Ferrybox pump status at measurement time (1/0/None) |
+| `longitude` | `float \| None` | In-situ longitude (decimal degrees) |
+| `latitude` | `float \| None` | In-situ latitude (decimal degrees) |
+| `qc_flow` | `bool \| None` | Flow QC flag (see Quality Control) — `None` = not evaluated |
+| `qc_dye` | `bool \| None` | Dye QC flag |
+| `qc_biofouling` | `bool \| None` | Biofouling QC flag |
+| `qc_temp_sensor` | `bool \| None` | Temperature-sensor QC flag |
+| `qc_udp` | `bool \| None` | Ferrybox/UDP-connection QC flag |
+| `qc_overall` | `bool \| None` | `all()` of the five QC flags |
 | `injections` | `tuple[CO3InjectionResult, …]` | One per injection cycle |
 | `spectra` | `SpectralData` | Raw intensity arrays |
 | `summary()` | method | Formatted single-line result string |
@@ -315,7 +338,7 @@ Primary DTO returned by `pHInstrumentAPI.run_single_measurement()`.
 | `pH_cuvette` | `float` | Final pH — intercept of multi-injection regression |
 | `pH_insitu` | `float` | T-corrected to Ferrybox sea-surface temperature |
 | `r_square` | `float` | Regression r² (0–1) |
-| `slope` | `float` | Regression slope (pH / mL) |
+| `slope` | `float` | Regression slope (pH / mL); logged as `perturbation` (the dye-addition perturbation, original `pHox.py` regression block) |
 | `t_cuvette` | `float` | Cuvette temperature at measurement (°C) |
 | `salinity_input` | `float` | Salinity before dilution correction |
 | `salinity_corrected` | `float` | Salinity after dilution correction |
@@ -327,6 +350,15 @@ Primary DTO returned by `pHInstrumentAPI.run_single_measurement()`.
 | `dye` | `str` | `"MCP"` or `"TB"` |
 | `fb_temp` | `float \| None` | Ferrybox sea-surface temperature (°C) |
 | `fb_sal` | `float \| None` | Ferrybox salinity (PSU) |
+| `fb_pumping` | `int \| None` | Ferrybox pump status at measurement time (1/0/None) |
+| `longitude` | `float \| None` | In-situ longitude (decimal degrees) |
+| `latitude` | `float \| None` | In-situ latitude (decimal degrees) |
+| `qc_flow` | `bool \| None` | Flow QC flag (see Quality Control) — `None` = not evaluated |
+| `qc_dye` | `bool \| None` | Dye QC flag |
+| `qc_biofouling` | `bool \| None` | Biofouling QC flag |
+| `qc_temp_sensor` | `bool \| None` | Temperature-sensor QC flag |
+| `qc_udp` | `bool \| None` | Ferrybox/UDP-connection QC flag |
+| `qc_overall` | `bool \| None` | `all()` of the five QC flags |
 | `injections` | `tuple[pHInjectionResult, …]` | One per injection cycle |
 | `spectra` | `SpectralData` | Raw intensity arrays |
 | `summary()` | method | Formatted single-line result string |
@@ -574,6 +606,9 @@ Ferrybox communication is fully implemented using `asyncio.DatagramProtocol` wit
 | `salinity` | `float` | In-situ salinity (PSU) |
 | `timestamp` | `datetime` | UTC time the packet was received |
 | `temperature` | `float \| None` | Optional sea-surface temperature (°C) |
+| `pumping` | `int \| None` | Ferrybox pump status: `1` = on, `0` = off, `None` = unknown / no connection. Drives continuous-mode Paused/resume (`0` → pause, `1` → resume). Mirrors original `udp.FERRYBOX["pumping"]`. |
+| `longitude` | `float \| None` | Optional in-situ longitude (decimal degrees) |
+| `latitude` | `float \| None` | Optional in-situ latitude (decimal degrees) |
 
 **`IUDPPayload`** (runtime-checkable Protocol) — any measurement result that implements `to_udp_payload() → dict` satisfies this; no inheritance needed.
 
@@ -584,10 +619,13 @@ Ferrybox communication is fully implemented using `asyncio.DatagramProtocol` wit
 - Binds `0.0.0.0:{local_port}` for incoming Ferrybox packets; sends to `{ferrybox_host}:{ferrybox_port}`
 - Incoming packet format (UTF-8 JSON, newline-delimited):
   ```json
-  {"type": "ferrybox_data", "salinity": 35.012, "temperature": 18.5}
+  {"type": "ferrybox_data", "salinity": 35.012, "temperature": 18.5,
+   "pumping": 1, "longitude": 10.71, "latitude": 59.91}
   ```
   Packets with a missing or non-`"ferrybox_data"` `type` field are silently discarded.
-  `temperature` is optional; missing/malformed values are treated as `None`.
+  `temperature`, `pumping`, `longitude`, and `latitude` are optional; missing/malformed
+  values are treated as `None`. (The original instrument used NMEA `$PFBOX,SAL/PUMP/TEMP/LAT/LON`
+  strings; phox2 keeps the same fields over a JSON wire format.)
 - Outgoing: `json.dumps(result.to_udp_payload()) + "\n"` sent to the Ferrybox. Errors are logged but not raised.
 
 **`NullFerryboxClient`** — no-op used when `ferrybox.enabled: false`. All methods do nothing; `get_latest_data()` always returns `None`.
@@ -641,16 +679,23 @@ Anir, Vol_injected, DYE
 
 ### Log file (one row per final measurement)
 
+The log row mirrors the Ferrybox data string (see GUI spec) followed by the QC columns.
+Detailed analytical values (per-wavelength absorbances, coefficients, etc.) live in the EVL
+files, not the log.
+
 **CO3 log** (`{base}/data_co3/CO3.log`) columns:
 ```
-Time, SHIP, co3, T_cuvette, S_input, S_corr, voltage, A1, A2, A3, R, dye
+Time, Lon, Lat, fb_temp, fb_sal, SHIP, co3, box_id, T_cuvette,
+flow_QC, dye_coming_qc, biofouling_qc, temp_sens_qc, UDP_conn_qc, overall_qc
 ```
 
 **pH log** (`{base}/data_pH/pH.log`) columns:
 ```
-Time, SHIP, pH_cuvette, T_cuvette, S_input, S_corr, voltage,
-A1, A2, Anir, R, pH_insitu, r_square, dye
+Time, Lon, Lat, fb_temp, fb_sal, SHIP, pH_cuvette, T_cuvette, perturbation,
+evalAnir, pH_insitu, r_square, box_id,
+flow_QC, dye_coming_qc, biofouling_qc, temp_sens_qc, UDP_conn_qc, overall_qc
 ```
+(`perturbation` = regression `slope`; `evalAnir` = `a_nir`.)
 
 ### Timestamp format
 ```python
@@ -662,17 +707,20 @@ result.timestamp.strftime("%Y-%m-%d_%H:%M")        # in log rows
 
 ## Quality Control Checks (after each measurement)
 
-> **Not yet in `MeasurementResult`** — QC flags are planned but not currently stored in the data model or log. The logic below defines the intended checks.
+QC flags are **computed at the end of each measurement cycle and stored on the result**
+(`qc_flow`, `qc_dye`, `qc_biofouling`, `qc_temp_sensor`, `qc_udp`, `qc_overall`) and written
+to the log file. Each flag is tri-state: `None` = not evaluated, `False` = fail, `True` = pass.
 
-| QC flag | Logic |
-|---------|-------|
-| Flow | `(blue_pixel_after_last_injection − blue_pixel_before_last_injection) > flow_threshold` |
-| Dye | `mean(blank − inj_0) > 5` counts |
-| Biofouling | spectrometer integration time < 2 000 ms |
-| Temp sensor | Not all ADC voltage readings identical |
-| UDP | `udp.FERRYBOX['pumping'] is not None` (future, requires UDP module) |
+| QC flag | Field | Logic |
+|---------|-------|-------|
+| Flow | `qc_flow` | `(blue_pixel_now − blue_pixel_at_last_injection) > flow_threshold`. `blue_pixel_now` is a **fresh** spectrometer read taken ~3 s after the cycle (valve re-opened, fresh sample flowing); `blue_pixel_at_last_injection` is the blue-wavelength pixel of the final injection spectrum. |
+| Dye | `qc_dye` | `mean(blank − injection_0) > 5` counts |
+| Biofouling | `qc_biofouling` | spectrometer `integration_time_ms < 2000` |
+| Temp sensor | `qc_temp_sensor` | Not all per-injection ADC voltage readings identical (probe is alive) |
+| UDP | `qc_udp` | `fb_pumping is not None` (Ferrybox connection alive) |
+| Overall | `qc_overall` | `all([qc_flow, qc_dye, qc_biofouling, qc_temp_sensor, qc_udp])` |
 
-`flow_threshold` is a future config key (suggested default: 2 000 counts).
+`flow_threshold` is read from the `qc.flow_threshold` config key (default `2000` counts).
 
 ---
 

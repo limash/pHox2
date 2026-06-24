@@ -249,20 +249,16 @@ A 2-column table (label | editor). Read-only editing triggers disabled.
 
 **Scroll-wheel on dropdowns must be suppressed** to prevent accidental changes during normal operation.
 
-### Manual salinity group (group box "Salinity used for manual measurement")
+### Salinity source
 
-Shown in all modes. Used as the salinity input when a **single** (non-continuous, non-calibration) measurement is taken.
+There is **no manual-salinity widget** (the original's manual-salinity picker was removed).
+The instrument always reads salinity through the `IFerryboxClient`:
+- Single / Continuous mode → latest Ferrybox salinity (`api.get_ferrybox_data().salinity`).
+  When `ferrybox.enabled: false`, `StaticFerryboxClient` supplies a fixed fallback salinity.
+- Calibration mode → always uses the Tris-buffer salinity (`tris_buffer.salinity`, 35 PSU).
 
-Layout: four linked number pickers arranged as `XX.YYY`:
-- Whole number part: dropdown 0–39
-- First decimal: dropdown 0–9
-- Second decimal: dropdown 0–9
-- Third decimal: dropdown 0–9
-
-**Salinity selection logic**:
-- Single / Manual mode → use the value from this widget
-- Continuous mode → use Ferrybox UDP salinity (`None` passed to indicate "use live")
-- Calibration mode → always use `TrisBuffer.S_tris_buffer` (= 35 PSU)
+Because of this, `run_single_measurement()` and the continuous loop take **no** salinity
+argument — the API resolves salinity internally.
 
 ---
 
@@ -329,22 +325,25 @@ The backend is a FastAPI application running under uvicorn. It owns the instrume
 | `type` | Key fields | When sent |
 |--------|-----------|----------|
 | `state_snapshot` | `instrument_type`, `modes`, `measurement_n`, `last_result`, `wavelengths`, `n_cycles`, `interval_s` | On every new WebSocket connection |
-| `history` | `points: list[dict]` | On every new WebSocket connection — **used by pH result chart only**; CO3 Plot 2 ignores this message |
-| `sensor_update` | `t_cuvette`, `voltage`, `fb_temp`, `fb_sal` | Every 500 ms by `_sensor_poll` |
+| `history` | `points: list[dict]` | On every new WebSocket connection. Not consumed by Plot 2 (which renders the **last measurement** only — pH scatter+regression / CO3 absorbance). Available for an optional time-series view |
+| `sensor_update` | `t_cuvette`, `voltage`, `fb_temp`, `fb_sal`, `fb_pumping` | Every 500 ms by `_sensor_poll`; `fb_pumping` drives the Ferrybox-pump indicator and Paused mode |
 | `spectrum_update` | `intensities: list[float]` | Every ~int_time + 200–1000 ms by `_spectrum_poll`; paused during Measuring/Adjusting |
 | `step_complete` | `step: str` | When `on_step` callback fires during a measurement cycle |
-| `measurement_result` | `instrument: "co3"\|"ph"`, plus all result fields; **CO3 also includes `absorption_wavelengths: list[float]` (wavelengths 220–360 nm) and `absorption_spectra: dict[str, list[float]]` (absorbance per injection, keyed by 0-based string index)** | After a successful measurement cycle |
+| `measurement_result` | `instrument: "co3"\|"ph"`, plus all result fields. **CO3** also includes `absorption_wavelengths: list[float]` (220–360 nm) and `absorption_spectra: dict[str, list[float]]` (absorbance per injection, keyed by 0-based string index). **pH** also includes `slope` and `injections_scatter: list[{vol_ml, pH}]` (drives the Plot 2 scatter + regression line) | After a successful measurement cycle |
 | `countdown` | `seconds_remaining: int` | Every 15 s while Continuous mode is active |
 | `mode_change` | `modes: list[str]`, `measurement_n: int` | When the mode set changes |
+| `dye_level` | `value: int` | When the dye level changes (refill, clear, or auto-deduction after a cycle) |
+| `qc_update` | `qc_flow`, `qc_dye`, `qc_biofouling`, `qc_temp_sensor`, `qc_udp`, `qc_overall` (each `bool \| null`) | After a measurement cycle's QC is evaluated |
+| `calibration_update` | `steps: list[dict]` (per-step progress + tri-state result), `result`, `date` | During and after the pH calibration workflow |
 | `log_line` | `text: str` | When a Python `logging` record is emitted |
 
 #### Incoming commands (client → server)
 
 | `cmd` | Extra fields | Backend action |
 |-------|-------------|---------------|
-| `start_continuous` | `salinity: float` | Start `_continuous_loop(salinity)` as asyncio task |
+| `start_continuous` | — | Start `_continuous_loop()` as asyncio task (salinity read from Ferrybox) |
 | `stop_continuous` | — | Set `_stop_continuous` event |
-| `start_single` | `salinity: float` | Run `_run_measurement(salinity, flush_before=False)` once |
+| `start_single` | — | Run `_run_measurement(flush_before=False)` once (salinity read from Ferrybox) |
 | `open_valve` | — | `await api.open_valve()` |
 | `close_valve` | — | `await api.close_valve()` |
 | `turn_on_light` | — | `api.turn_on_light()` (CO3 only) |
@@ -357,6 +356,20 @@ The backend is a FastAPI application running under uvicorn. It owns the instrume
 | `pulse_dye_pump` | `n_shots: int` | `await api.pulse_dye_pump(n_shots)` |
 | `drain_cuvette` | — | `await api.drain_cuvette()` |
 | `auto_adjust` | — | `await api.auto_adjust_integration_time()` with mode lock |
+| `turn_on_leds` | — | `api.turn_on_leds()` (pH only) |
+| `turn_off_leds` | — | `api.turn_off_leds()` (pH only) |
+| `set_led_duty_cycle` | `channel: int`, `duty: int` | `api.set_led_duty_cycle(channel, duty)` (pH only); auto-sets the Light toggle to on |
+| `refill_dye` | — | Add one bag to the dye level (+1000, capped at 2000) and persist to config |
+| `clear_dye` | — | Reset dye level to 0 and persist to config |
+| `start_calibration` | `batch_number: int`, `with_cleaning: bool` | Start the pH Tris-buffer calibration workflow as an asyncio task (pH only) |
+| `stop_calibration` | — | Abort the running calibration workflow |
+| `test_udp` | `enabled: bool` | Toggle the periodic test-UDP broadcast (every 10 s) |
+| `save_config` | — | Persist current config selections to the YAML config file |
+| `set_dye_type` | `dye: str` | Update `co3.dye` / `ph.dye` (pH dye change also updates wavelengths) |
+| `set_autoadjust` | `mode: str` | Set autoadjust mode `ON`/`OFF`/`ON_NORED` |
+| `set_sampling_interval` | `minutes: int` | Update continuous-mode interval |
+| `set_integration_time` | `time_ms: float` | Set spectrometer integration time immediately |
+| `set_drain_mode` | `mode: str` | Set drain mode `ON`/`OFF` (CO3 only) |
 
 ### Background Tasks
 
@@ -370,13 +383,19 @@ The backend is a FastAPI application running under uvicorn. It owns the instrume
 
 ### Mode Set
 
-Modes are tracked as a Python `set[str]`. Multiple modes can be active simultaneously (e.g. `{"Continuous", "Measuring"}` during a continuous cycle run).
+The backend mode set is the **single source of truth** for the GUI's enable/disable rules and
+is broadcast on every change via `mode_change`. Modes are tracked as a Python `set[str]`;
+multiple modes can be active simultaneously (e.g. `{"Continuous", "Measuring"}` during a
+continuous cycle run).
 
 | Mode string | Meaning |
 |------------|--------|
 | `"Measuring"` | A measurement cycle is actively running |
 | `"Adjusting"` | Auto-adjustment of light/LEDs is running |
 | `"Continuous"` | Automatic periodic sampling is scheduled |
+| `"Manual"` | Manual hardware control is enabled by the user |
+| `"Calibration"` | A pH calibration check cycle is running |
+| `"Paused"` | Continuous mode is active but paused because the Ferrybox pump is off (`fb_pumping == 0`); resumes automatically when `fb_pumping` returns to `1` |
 
 Every mode change broadcasts a `mode_change` message to all clients.
 
@@ -513,7 +532,7 @@ On autostart, also:
 
 | GUI action | API call |
 |-----------|---------|
-| Start single measurement | `await api.run_single_measurement(salinity, flush_before)` |
+| Start single measurement | `await api.run_single_measurement(flush_before, on_step)` (salinity resolved internally) |
 | Get live spectrum | `await api.get_spectrum()` |
 | Read temperature | `api.get_temperature()` |
 | Open/close valve | `await api.open_valve()` / `await api.close_valve()` |

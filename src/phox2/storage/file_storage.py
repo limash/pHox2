@@ -105,17 +105,20 @@ class CO3FileStorage:
             [
                 {
                     "Time": result.timestamp.strftime(_LOG_TIMESTAMP_FMT),
+                    "Lon": result.longitude,
+                    "Lat": result.latitude,
+                    "fb_temp": result.fb_temp,
+                    "fb_sal": result.fb_sal,
                     "SHIP": result.ship_code,
                     "co3": result.co3_umol_per_kg,
+                    "box_id": result.box_id,
                     "T_cuvette": result.t_cuvette,
-                    "S_input": result.salinity_input,
-                    "S_corr": result.salinity_corrected,
-                    "voltage": result.voltage,
-                    "A1": result.a1,
-                    "A2": result.a2,
-                    "A3": result.a3,
-                    "R": result.r_ratio,
-                    "dye": result.dye,
+                    "flow_QC": result.qc_flow,
+                    "dye_coming_qc": result.qc_dye,
+                    "biofouling_qc": result.qc_biofouling,
+                    "temp_sens_qc": result.qc_temp_sensor,
+                    "UDP_conn_qc": result.qc_udp,
+                    "overall_qc": result.qc_overall,
                 }
             ]
         )
@@ -192,19 +195,24 @@ class pHFileStorage:
             [
                 {
                     "Time": result.timestamp.strftime(_LOG_TIMESTAMP_FMT),
+                    "Lon": result.longitude,
+                    "Lat": result.latitude,
+                    "fb_temp": result.fb_temp,
+                    "fb_sal": result.fb_sal,
                     "SHIP": result.ship_code,
                     "pH_cuvette": result.pH_cuvette,
                     "T_cuvette": result.t_cuvette,
-                    "S_input": result.salinity_input,
-                    "S_corr": result.salinity_corrected,
-                    "voltage": result.voltage,
-                    "A1": result.a1,
-                    "A2": result.a2,
-                    "Anir": result.a_nir,
-                    "R": result.r_ratio,
+                    "perturbation": result.slope,
+                    "evalAnir": result.a_nir,
                     "pH_insitu": result.pH_insitu,
                     "r_square": result.r_square,
-                    "dye": result.dye,
+                    "box_id": result.box_id,
+                    "flow_QC": result.qc_flow,
+                    "dye_coming_qc": result.qc_dye,
+                    "biofouling_qc": result.qc_biofouling,
+                    "temp_sens_qc": result.qc_temp_sensor,
+                    "UDP_conn_qc": result.qc_udp,
+                    "overall_qc": result.qc_overall,
                 }
             ]
         )

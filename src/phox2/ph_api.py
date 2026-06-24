@@ -115,6 +115,7 @@ class pHInstrumentAPI:
         self,
         flush_before: bool = False,
         on_step: Callable[[str], None] | None = None,
+        salinity: float | None = None,
     ) -> pHMeasurementResult:
         """
         Run a complete pH measurement cycle.
@@ -138,21 +139,39 @@ class pHInstrumentAPI:
         """
         self._require_connected()
         fb = self._ferrybox.get_latest_data()
-        if fb is None:
-            raise RuntimeError("No Ferrybox data available — cannot determine salinity")
-        salinity = fb.salinity
-        fb_temp = fb.temperature
-        fb_sal = fb.salinity
+        if salinity is None:
+            if fb is None:
+                raise RuntimeError("No Ferrybox data available — cannot determine salinity")
+            salinity = fb.salinity
+        fb_temp = fb.temperature if fb is not None else None
+        fb_sal = fb.salinity if fb is not None else None
         logger.info("Starting single pH measurement (S=%.3f)", salinity)
         result = await self._cycle.run(
             salinity=salinity,
             flush_before=flush_before,
             fb_temp=fb_temp,
             fb_sal=fb_sal,
+            fb_pumping=fb.pumping if fb is not None else None,
+            longitude=fb.longitude if fb is not None else None,
+            latitude=fb.latitude if fb is not None else None,
             on_step=on_step,
         )
         await self._ferrybox.send_result(result)
         return result
+
+    # ── Calibration ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def theoretical_tris_ph(t_cuvette: float, salinity: float = 35.0) -> float:
+        """
+        Theoretical pH of a Tris buffer at *t_cuvette* (°C) and *salinity* (PSU).
+
+        Used by the calibration workflow to compare a measured pH against a
+        known reference.
+        """
+        from phox2.physics.ph_calculator import pHCalculator
+
+        return pHCalculator.theoretical_tris_ph(t_cuvette, salinity)
 
     # ── Ferrybox data ─────────────────────────────────────────────────────
 

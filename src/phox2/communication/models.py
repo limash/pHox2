@@ -21,11 +21,19 @@ class FerryboxData:
         Time the Ferrybox packet was received (local clock).
     temperature:
         Optional sea-surface temperature (°C) provided by the Ferrybox.
+    pumping:
+        Ferrybox pump status: ``1`` = on, ``0`` = off, ``None`` = unknown / no
+        connection.  Drives continuous-mode Paused/resume.
+    longitude, latitude:
+        Optional in-situ position (decimal degrees).
     """
 
     salinity: float
     timestamp: datetime
     temperature: float | None = None
+    pumping: int | None = None
+    longitude: float | None = None
+    latitude: float | None = None
 
 
 @runtime_checkable
