@@ -11,6 +11,13 @@ description: "Use when implementing, extending, or reviewing the GUI for pH or C
 - **Mode-driven**: every interactive widget has an enabled/disabled state determined by the current operating mode. The mode state machine is the single source of truth for what the user is allowed to do.
 - **Async-safe**: measurement cycles and hardware calls are `async`. The backend must not block the event loop; all instrument API calls must be awaited within asyncio tasks.
 
+## Deployment Context
+
+The GUI is rendered in **Chromium kiosk mode** on a **Raspberry Pi 7" touchscreen (800 × 480 px)**. Design constraints:
+- **Touch targets**: interactive elements must be at least 34–44 px tall. Tailwind `py-2.5` on `text-sm` buttons gives ~34 px; `py-3` gives ~38 px. Never use `py-1` on tappable elements.
+- **No pinch-zoom**: the viewport has `user-scalable=no`. Layout must work at exactly 800 × 480 — do not rely on the user zooming in to read small text.
+- **No keyboard**: prefer tap-friendly controls (buttons, selects) over free-text inputs wherever possible.
+
 ---
 
 ## Application-Level Shell

@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=phox2 Kiosk
+Exec=/bin/bash -c 'until curl -sf http://localhost:8000/ > /dev/null 2>&1; do sleep 2; done; chromium-browser --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-pinch --overscroll-history-navigation=0 http://localhost:8000'
+X-GNOME-Autostart-enabled=true
